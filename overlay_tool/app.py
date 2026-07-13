@@ -129,7 +129,8 @@ class OverlayApp:
             ax.set_aspect("auto")
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=root)
-        self._at_home = True  # False once the user zooms/pans
+        self._at_home = True   # False once the user zooms/pans
+        self._fit_guard = 0    # draw-event refit loop breaker
 
         # Bottom-up packing: status bar, then buttons, then the matplotlib
         # toolbar are packed BEFORE the canvas — when the window is small,
@@ -176,6 +177,7 @@ class OverlayApp:
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("button_release_event", self._on_release)
         self.canvas.mpl_connect("resize_event", self._on_resize)
+        self.canvas.mpl_connect("draw_event", self._on_draw)
 
         # Restore the previous session (CLI argument beats remembered path).
         dxf = dxf_override or self.settings.get("outline")
@@ -493,12 +495,10 @@ class OverlayApp:
         bb = ax.get_position()
         return max(bb.width * fw, 1.0), max(bb.height * fh, 1.0)
 
-    def _fit_side(self, i: int):
+    def _fit_lims(self, i: int):
         """Whole-board view for side i: equal mm/px filling the axes box,
         padding (never cropping) the slack dimension."""
         o = self.outline
-        if o is None:
-            return
         ax = self.axes[i]
         bw = (o.xmax - o.xmin) * 1.04 + 2.0
         bh = (o.ymax - o.ymin) * 1.02 + 2.0
@@ -511,8 +511,14 @@ class OverlayApp:
         else:                          # board wider than box: x limits
             half_x = bw / 2
             half_y = half_x * box_h / box_w
-        ax.set_xlim(cx - half_x, cx + half_x)
-        ax.set_ylim(cy - half_y, cy + half_y)
+        return (cx - half_x, cx + half_x), (cy - half_y, cy + half_y)
+
+    def _fit_side(self, i: int):
+        if self.outline is None:
+            return
+        xlim, ylim = self._fit_lims(i)
+        self.axes[i].set_xlim(*xlim)
+        self.axes[i].set_ylim(*ylim)
 
     def _equalize(self, ax):
         """Re-assert equal mm/px after the axes box changed: keep the y view,
@@ -526,6 +532,7 @@ class OverlayApp:
 
     def reset_view(self):
         self._at_home = True
+        self._fit_guard = 0
         for i in range(2):
             self._fit_side(i)
         self.canvas.draw_idle()
@@ -533,12 +540,38 @@ class OverlayApp:
     def _on_resize(self, _event):
         if self.outline is None:
             return
+        self._fit_guard = 0
         for i, ax in enumerate(self.axes):
             if self._at_home:
                 self._fit_side(i)
             else:
                 self._equalize(ax)
         self.canvas.draw_idle()
+
+    def _on_draw(self, _event):
+        """Self-heal the home view: the axes boxes are only final after a
+        draw (Tk window mapping, constrained-layout passes), so verify the
+        fit against the now-real layout and refit when it is off. Fixes the
+        startup view with a restored window size."""
+        if not self._at_home or self.outline is None:
+            return
+        if self._fit_guard >= 3:  # settled/oscillating: leave it alone
+            return
+        def off(want, got):
+            return any(abs(w - g) > 0.05 + 1e-3 * abs(w)
+                       for w, g in zip(want, got))
+        stale = False
+        for i, ax in enumerate(self.axes):
+            xw, yw = self._fit_lims(i)
+            if off(xw, ax.get_xlim()) or off(yw, ax.get_ylim()):
+                stale = True
+        if stale:
+            self._fit_guard += 1
+            for i in range(2):
+                self._fit_side(i)
+            self.canvas.draw_idle()
+        else:
+            self._fit_guard = 0
 
     # ---- zoom (wheel) & pan (left-drag) --------------------------------------
 
