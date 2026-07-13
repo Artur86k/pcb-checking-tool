@@ -56,6 +56,13 @@ def _comment_dnp(part: Part) -> bool:
     return part.comment.strip().lower().startswith(DNP_COMMENT)
 
 
+def _is_testpoint(part: Part) -> bool:
+    """Test points (footprint TP*, comment 'TP') are bare by design —
+    excluded from the presence check entirely."""
+    return (part.footprint.upper().startswith("TP")
+            or part.comment.strip().upper() == "TP")
+
+
 class OverlayToolbar(NavigationToolbar2Tk):
     """Toolbar whose Home button restores the full-board view, regardless of
     how the plots were zoomed/panned (toolbar, wheel or left-drag)."""
@@ -90,7 +97,10 @@ class OverlayApp:
         self.settings = load_settings()
         self.outline: Outline | None = None
         root.title("PCB Photo Overlay")
-        root.geometry("1000x900")
+        # fit the screen so the bottom controls are visible at startup
+        w = min(1000, root.winfo_screenwidth() - 60)
+        h = min(900, root.winfo_screenheight() - 100)
+        root.geometry(f"{w}x{h}")
 
         self.fig = Figure(figsize=(9, 8), constrained_layout=True)
         self.axes = self.fig.subplots(1, 2)
@@ -112,12 +122,18 @@ class OverlayApp:
             ax.set_aspect("equal", adjustable="datalim")
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=root)
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self._home_views: list[tuple] = []  # per-axes (xlim, ylim) full view
-        self.toolbar = OverlayToolbar(self.canvas, root, self)
+
+        # Bottom-up packing: status bar, then buttons, then the matplotlib
+        # toolbar are packed BEFORE the canvas — when the window is small,
+        # Tk clips the last-packed widget, which must be the plots, never
+        # the controls.
+        self.status = tk.Label(root, text="Open a board outline to begin.",
+                               anchor="w", relief=tk.SUNKEN)
+        self.status.pack(fill=tk.X, side=tk.BOTTOM)
 
         bar = tk.Frame(root)
-        bar.pack(fill=tk.X, padx=6, pady=4)
+        bar.pack(fill=tk.X, side=tk.BOTTOM, padx=6, pady=4)
         self.buttons = []
         for label, cmd in (
             ("Open BRD outline…", self.open_outline),
@@ -144,9 +160,8 @@ class OverlayApp:
         tk.Button(bar, text="Save overlay PNG…",
                   command=self.save_png).pack(side=tk.RIGHT, padx=4)
 
-        self.status = tk.Label(root, text="Open a board outline to begin.",
-                               anchor="w", relief=tk.SUNKEN)
-        self.status.pack(fill=tk.X, side=tk.BOTTOM)
+        self.toolbar = OverlayToolbar(self.canvas, root, self)  # packs bottom
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         self._pan = None  # (axes, press x/y px, xlim, ylim) during right-drag
         self.canvas.mpl_connect("motion_notify_event", self._on_hover)
@@ -351,6 +366,7 @@ class OverlayApp:
         method = "CNN" if use_cnn else "color"
         checked = 0
         fit_notes: list[str] = []
+        checkable = [p for p in self.parts if not _is_testpoint(p)]
         for i, side in enumerate(SIDE_KEYS):
             if self.warped[i] is None or self.reg_info[i] is None:
                 continue
@@ -378,10 +394,10 @@ class OverlayApp:
                         full, self.outline, hom, scale, presence_cnn.PPMM,
                         field)
                     res = presence_cnn.classify_raster(
-                        raster, presence_cnn.PPMM, self.outline, self.parts,
+                        raster, presence_cnn.PPMM, self.outline, checkable,
                         side)
                 else:
-                    res = check_presence(disp, self.outline, self.parts, side)
+                    res = check_presence(disp, self.outline, checkable, side)
             except Exception as ex:
                 self.root.after(0, messagebox.showerror,
                                 "Presence check failed", str(ex))
