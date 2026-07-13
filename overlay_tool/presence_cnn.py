@@ -57,33 +57,24 @@ def _load(path: str | None = None):
     return _model
 
 
-def classify(full_rgb: np.ndarray, outline: Outline, parts: list[Part],
-             side: str, photo_h: np.ndarray, photo_scale: float,
-             model_path: str | None = None,
-             thresh: float = 0.5) -> dict[str, PresenceResult]:
-    """Presence verdict for every part of `side` from the full-res photo.
+def _select(outline: Outline, parts: list[Part], side: str) -> list[Part]:
+    return [p for p in parts
+            if p.side == side
+            and outline.xmin - 1 <= p.x_mm <= outline.xmax + 1
+            and outline.ymin - 1 <= p.y_mm <= outline.ymax + 1]
 
-    `photo_h` / `photo_scale` as in presence.extract_roi. Returns the same
-    result type as the color heuristic; `bare_frac` holds 1 - p(present).
-    """
+
+def _run(sel: list[Part], rois: list[np.ndarray], side: str,
+         model_path: str | None, thresh: float) -> dict[str, PresenceResult]:
     import torch
     model = _load(model_path)
-
-    sel = [p for p in parts
-           if p.side == side
-           and outline.xmin - 1 <= p.x_mm <= outline.xmax + 1
-           and outline.ymin - 1 <= p.y_mm <= outline.ymax + 1]
-    crops = []
-    means = []
-    for p in sel:
-        roi = extract_roi(full_rgb, p, outline, photo_h, photo_scale,
-                          ppmm=PPMM, margin_mm=MARGIN_MM)
+    crops, means = [], []
+    for roi in rois:
         if side == "bottom":  # match training-time appearance normalization
             roi = roi[:, ::-1]
         means.append(roi.reshape(-1, 3).mean(axis=0))
         crops.append(cv2.resize(roi, (INPUT_SIZE, INPUT_SIZE),
                                 interpolation=cv2.INTER_AREA))
-
     results: dict[str, PresenceResult] = {}
     with torch.no_grad():
         for i0 in range(0, len(crops), BATCH):
@@ -96,3 +87,30 @@ def classify(full_rgb: np.ndarray, outline: Outline, parts: list[Part],
                     mean_rgb=tuple(float(v) for v in m),
                     present=bool(pp >= thresh))
     return results
+
+
+def classify(full_rgb: np.ndarray, outline: Outline, parts: list[Part],
+             side: str, photo_h: np.ndarray, photo_scale: float,
+             model_path: str | None = None,
+             thresh: float = 0.5) -> dict[str, PresenceResult]:
+    """Presence verdict for every part of `side` from the full-res photo.
+
+    `photo_h` / `photo_scale` as in presence.extract_roi. Returns the same
+    result type as the color heuristic; `bare_frac` holds 1 - p(present).
+    """
+    sel = _select(outline, parts, side)
+    rois = [extract_roi(full_rgb, p, outline, photo_h, photo_scale,
+                        ppmm=PPMM, margin_mm=MARGIN_MM) for p in sel]
+    return _run(sel, rois, side, model_path, thresh)
+
+
+def classify_raster(raster: np.ndarray, ppmm: float, outline: Outline,
+                    parts: list[Part], side: str,
+                    model_path: str | None = None,
+                    thresh: float = 0.5) -> dict[str, PresenceResult]:
+    """Same as classify(), but from a (distortion-corrected) board raster."""
+    from .distortion import extract_patch
+    sel = _select(outline, parts, side)
+    rois = [extract_patch(raster, outline, p, ppmm, margin_mm=MARGIN_MM)
+            for p in sel]
+    return _run(sel, rois, side, model_path, thresh)

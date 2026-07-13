@@ -24,7 +24,7 @@ from matplotlib.figure import Figure
 from .outline import Outline, load_outline
 from .pnp import Part, load_pnp
 from .presence import PresenceResult, check_presence
-from . import presence_cnn
+from . import distortion, presence_cnn
 from .register import load_photo, register_photo
 
 IOU_WARN = 0.90  # below this, flag the fit as questionable
@@ -291,21 +291,38 @@ class OverlayApp:
         method = "CNN" if use_cnn else "color"
         absent_all: list[str] = []
         checked = 0
+        fit_notes: list[str] = []
         for i, side in enumerate(SIDE_KEYS):
-            if self.warped[i] is None:
+            if self.warped[i] is None or self.reg_info[i] is None:
                 continue
             self.root.after(0, self.status.config, {
-                "text": f"Presence check ({method}) — {SIDE_NAMES[i]} …"})
+                "text": f"Presence ({method}): compensating lens distortion — "
+                        f"{SIDE_NAMES[i]} …"})
             try:
+                path, hom, small_w = self.reg_info[i]
+                full = load_photo(path, max_dim=100000)
+                scale = full.shape[1] / small_w
+                # self-calibrate residual distortion on the components,
+                # then work from the corrected board raster
+                samples = distortion.measure_offsets(
+                    full, self.outline, self.parts, side, hom, scale)
+                field = distortion.fit_field(samples)
+                if field is not None:
+                    fit_notes.append(
+                        f"{side} fit {field.rmse_before:.2f}→"
+                        f"{field.rmse_after:.2f}mm")
+                disp = distortion.warp_board_raster(
+                    full, self.outline, hom, scale, self.outline.scale, field)
+                self.root.after(0, self._apply_corrected_image, i, disp)
                 if use_cnn:
-                    path, hom, small_w = self.reg_info[i]
-                    full = load_photo(path, max_dim=100000)
-                    res = presence_cnn.classify(
-                        full, self.outline, self.parts, side, hom,
-                        full.shape[1] / small_w)
+                    raster = distortion.warp_board_raster(
+                        full, self.outline, hom, scale, presence_cnn.PPMM,
+                        field)
+                    res = presence_cnn.classify_raster(
+                        raster, presence_cnn.PPMM, self.outline, self.parts,
+                        side)
                 else:
-                    res = check_presence(self.warped[i], self.outline,
-                                         self.parts, side)
+                    res = check_presence(disp, self.outline, self.parts, side)
             except Exception as ex:
                 self.root.after(0, messagebox.showerror,
                                 "Presence check failed", str(ex))
@@ -314,24 +331,34 @@ class OverlayApp:
             absent_all += [r.part.refdes for r in res.values() if not r.present]
             self.root.after(0, self._presence_side_done, i, res)
         self.root.after(0, self._presence_finished, checked,
-                        sorted(absent_all), method)
+                        sorted(absent_all), method, fit_notes)
+
+    def _apply_corrected_image(self, i: int, disp):
+        """Swap the displayed photo for the distortion-corrected raster."""
+        self.warped[i] = disp
+        if self.images[i] is None:
+            return
+        img = disp if i == 0 else disp[:, ::-1]
+        self.images[i].set_data(img)
+        self.canvas.draw_idle()
 
     def _presence_side_done(self, i: int, res: dict[str, PresenceResult]):
         self.presence[i] = res
         self._draw_absent_frames()
 
     def _presence_finished(self, checked: int, absent_all: list[str],
-                           method: str):
+                           method: str, fit_notes: list[str] | None = None):
         for b in self.buttons:
             b.config(state=tk.NORMAL)
         names = ", ".join(absent_all)
         if len(names) > 120:
             names = names[:117] + "…"
+        fit = f"  [distortion {', '.join(fit_notes)}]" if fit_notes else ""
         self.status.config(
             text=f"Presence ({method}): {checked} checked, "
                  f"{len(absent_all)} not mounted"
                  + (f": {names}" if absent_all else "")
-                 + "  (hover a frame for details)")
+                 + fit + "  (hover a frame for details)")
 
     def _draw_absent_frames(self):
         for artists in self.absent_artists:

@@ -24,6 +24,20 @@ becomes an addressable ROI.
 - **UI**: wheel zoom at cursor, left-drag pan, hover shows refdes / footprint /
   size / rotation, photo opacity slider, overlay PNG export.
 
+## Distortion self-calibration
+
+A single homography can't absorb phone-lens radial distortion or board
+flex — component frames drift off their parts toward the frame edges (up
+to ~0.9 mm measured on an S23 Ultra). The presence check therefore
+self-calibrates each photo on the components themselves: every part is
+located by template-matching against its footprint group's median
+template, a degree-3 polynomial offset field is robust-fitted to the
+residuals, and the board raster is remapped accordingly
+(`overlay_tool/distortion.py`). Median frame-to-part offset drops from
+~0.22 mm to ~0.05 mm; the displayed overlay switches to the corrected
+raster after a presence check. No checkerboard or calibration shots
+needed — any populated board is its own target.
+
 ## Presence check
 
 The **Check presence** button flags not-mounted components (red frames,

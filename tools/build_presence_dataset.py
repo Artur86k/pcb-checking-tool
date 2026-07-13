@@ -13,7 +13,7 @@ from overlay_tool.outline import load_outline
 from overlay_tool.pnp import load_pnp
 from overlay_tool.bom import load_bom
 from overlay_tool.register import load_photo, register_photo
-from overlay_tool.presence import extract_roi
+from overlay_tool import distortion
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KNOWN = {"top": BASE + "/pcb_photo_samples/20260712_174803.jpg",
@@ -64,17 +64,25 @@ for path in sorted(glob.glob(BASE + "/pcb_photo_samples/*")):
     photos.append((path, best[0], best[1]))
     print(f"{name}: {best[0]} corr={best[2]:.2f} iou={best[1].iou:.3f}")
 
+dnp = {ref for ref, b in bom.items() if b.dnp}
 X, y, ref_ids, photo_ids, sides = [], [], [], [], []
 for path, side, r in photos:
     full = load_photo(path, max_dim=100000)
-    f = full.shape[1] / cv2.resize(full, (1, 1)).shape[1]  # placeholder
     small_w = load_photo(path).shape[1]
     f = full.shape[1] / small_w
+    # self-calibrate residual lens distortion on this photo's components,
+    # so training crops match the corrected-raster inference path
+    samples = distortion.measure_offsets(full, o, parts, side, r.homography,
+                                         f, skip=dnp)
+    field = distortion.fit_field(samples)
+    raster = distortion.warp_board_raster(full, o, r.homography, f, PPMM,
+                                          field)
+    if field is not None:
+        print(f"  field: {field.rmse_before:.3f} -> {field.rmse_after:.3f} mm")
     for p in parts:
         if p.side != side:
             continue
-        roi = extract_roi(full, p, o, r.homography, f, ppmm=PPMM,
-                          margin_mm=MARGIN)
+        roi = distortion.extract_patch(raster, o, p, PPMM, margin_mm=MARGIN)
         if p.side == "bottom":
             roi = roi[:, ::-1]
         X.append(cv2.resize(roi, (SIZE, SIZE), interpolation=cv2.INTER_AREA))
