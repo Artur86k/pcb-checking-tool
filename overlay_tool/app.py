@@ -47,6 +47,14 @@ SIDE_NAMES = ("Top side", "Bottom side (bottom view)")
 # and component frames mirrored (x -> -x) from the top-view frame.
 SIDE_XSIGN = (1.0, -1.0)
 
+# Pick&place comment marking a DNP position (used when no BOM is loaded;
+# the BOM's "Не устанавливается" list is authoritative once loaded)
+DNP_COMMENT = "не устанавливается"
+
+
+def _comment_dnp(part: Part) -> bool:
+    return part.comment.strip().lower().startswith(DNP_COMMENT)
+
 
 class OverlayToolbar(NavigationToolbar2Tk):
     """Toolbar whose Home button restores the full-board view, regardless of
@@ -89,6 +97,7 @@ class OverlayApp:
         self.images = [None, None]  # AxesImage per side
         self.outline_artists = [None, None]
         self.parts: list[Part] = []
+        self._part_by_ref: dict[str, Part] = {}
         self.bom: dict[str, BomItem] | None = None
         self.frame_artists: list[list] = [[], []]  # LineCollections per side
         self.warped: list = [None, None]           # registered photo per side
@@ -232,6 +241,7 @@ class OverlayApp:
     def set_pnp(self, path: str):
         try:
             self.parts = load_pnp(path)
+            self._part_by_ref = {p.refdes: p for p in self.parts}
         except Exception as ex:
             messagebox.showerror("Cannot load P&P", f"{path}\n\n{ex}")
             return
@@ -293,18 +303,26 @@ class OverlayApp:
         self.settings["bom"] = path
         save_settings(self.settings)
         n_dnp = sum(1 for b in self.bom.values() if b.dnp)
+        # surface BOM<->P&P disagreements (data errors in the design files)
+        conflicts = [p.refdes for p in self.parts
+                     if _comment_dnp(p) and p.refdes in self.bom
+                     and not self.bom[p.refdes].dnp]
+        note = (f"  ⚠ P&P says DNP but BOM populated: {', '.join(conflicts)}"
+                if conflicts else "")
         self.status.config(
-            text=f"BOM loaded: {len(self.bom)} positions, {n_dnp} DNP")
+            text=f"BOM loaded: {len(self.bom)} positions, {n_dnp} DNP{note}")
         if any(self.presence):
             self._draw_verdict_frames()  # re-color with BOM knowledge
 
     def _expected_present(self, refdes: str) -> bool:
-        """True when the BOM says a part must be mounted here. Positions
-        missing from the BOM count as DNP (nothing should be mounted)."""
-        if self.bom is None:
-            return True  # no BOM: every P&P position is expected populated
-        b = self.bom.get(refdes)
-        return b is not None and not b.dnp
+        """True when a part must be mounted here. The BOM's DNP list is
+        authoritative; without a BOM the P&P 'Не устанавливается' comment
+        is used. Positions missing from a loaded BOM count as DNP."""
+        if self.bom is not None:
+            b = self.bom.get(refdes)
+            return b is not None and not b.dnp
+        p = self._part_by_ref.get(refdes)
+        return p is None or not _comment_dnp(p)
 
     # ---- presence check ------------------------------------------------------
 
@@ -318,6 +336,12 @@ class OverlayApp:
         if all(w is None for w in self.warped):
             messagebox.showinfo("No photo", "Register at least one photo first.")
             return
+        if self.bom is None and messagebox.askyesno(
+                "No BOM loaded",
+                "Without a BOM only the P&P 'Не устанавливается' comments "
+                "mark DNP positions — the BOM DNP list is more complete.\n\n"
+                "Open a BOM now?"):
+            self.open_bom()
         for b in self.buttons:
             b.config(state=tk.DISABLED)
         threading.Thread(target=self._presence_worker, daemon=True).start()
@@ -519,6 +543,8 @@ class OverlayApp:
                     bnote = "  (not in BOM)"
                 elif b.dnp:
                     bnote = "  (DNP)"
+            elif _comment_dnp(best):
+                bnote = "  (DNP per P&P)"
             self.status.config(
                 text=f"{best.refdes}  {best.footprint}  {size}  "
                      f"rot {best.rot_deg:g}°{extra}{bnote}  — {best.comment}")
