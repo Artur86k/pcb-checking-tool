@@ -24,6 +24,7 @@ from matplotlib.figure import Figure
 from .outline import Outline, load_outline
 from .pnp import Part, load_pnp
 from .presence import PresenceResult, check_presence
+from . import presence_cnn
 from .register import load_photo, register_photo
 
 IOU_WARN = 0.90  # below this, flag the fit as questionable
@@ -88,6 +89,7 @@ class OverlayApp:
         self.parts: list[Part] = []
         self.frame_artists: list[list] = [[], []]  # LineCollections per side
         self.warped: list = [None, None]           # registered photo per side
+        self.reg_info: list = [None, None]         # (path, homography, width)
         self.presence: list[dict[str, PresenceResult]] = [{}, {}]
         self.absent_artists: list[list] = [[], []]
         for ax, name in zip(self.axes, SIDE_NAMES):
@@ -271,30 +273,63 @@ class OverlayApp:
     # ---- presence check ------------------------------------------------------
 
     def run_presence_check(self):
-        """Flag not-mounted components: positions where the frame shows the
-        green solder mask instead of a part body (red frames)."""
+        """Flag not-mounted components (red frames). Uses the CNN classifier
+        when golden/presence_cnn.pt and torch are available, otherwise the
+        solder-mask color heuristic."""
         if not self.parts:
             messagebox.showinfo("No P&P", "Open a pick & place file first.")
             return
         if all(w is None for w in self.warped):
             messagebox.showinfo("No photo", "Register at least one photo first.")
             return
+        for b in self.buttons:
+            b.config(state=tk.DISABLED)
+        threading.Thread(target=self._presence_worker, daemon=True).start()
+
+    def _presence_worker(self):
+        use_cnn = presence_cnn.available()
+        method = "CNN" if use_cnn else "color"
         absent_all: list[str] = []
         checked = 0
         for i, side in enumerate(SIDE_KEYS):
             if self.warped[i] is None:
                 continue
-            self.presence[i] = check_presence(
-                self.warped[i], self.outline, self.parts, side)
-            checked += len(self.presence[i])
-            absent_all += [r.part.refdes for r in self.presence[i].values()
-                           if not r.present]
+            self.root.after(0, self.status.config, {
+                "text": f"Presence check ({method}) — {SIDE_NAMES[i]} …"})
+            try:
+                if use_cnn:
+                    path, hom, small_w = self.reg_info[i]
+                    full = load_photo(path, max_dim=100000)
+                    res = presence_cnn.classify(
+                        full, self.outline, self.parts, side, hom,
+                        full.shape[1] / small_w)
+                else:
+                    res = check_presence(self.warped[i], self.outline,
+                                         self.parts, side)
+            except Exception as ex:
+                self.root.after(0, messagebox.showerror,
+                                "Presence check failed", str(ex))
+                continue
+            checked += len(res)
+            absent_all += [r.part.refdes for r in res.values() if not r.present]
+            self.root.after(0, self._presence_side_done, i, res)
+        self.root.after(0, self._presence_finished, checked,
+                        sorted(absent_all), method)
+
+    def _presence_side_done(self, i: int, res: dict[str, PresenceResult]):
+        self.presence[i] = res
         self._draw_absent_frames()
-        names = ", ".join(sorted(absent_all))
+
+    def _presence_finished(self, checked: int, absent_all: list[str],
+                           method: str):
+        for b in self.buttons:
+            b.config(state=tk.NORMAL)
+        names = ", ".join(absent_all)
         if len(names) > 120:
             names = names[:117] + "…"
         self.status.config(
-            text=f"Presence: {checked} checked, {len(absent_all)} not mounted"
+            text=f"Presence ({method}): {checked} checked, "
+                 f"{len(absent_all)} not mounted"
                  + (f": {names}" if absent_all else "")
                  + "  (hover a frame for details)")
 
@@ -391,7 +426,7 @@ class OverlayApp:
             r = self.presence[i].get(best.refdes)
             if r is not None:
                 verdict = "mounted" if r.present else "NOT MOUNTED"
-                extra = f"  [{verdict}, mask {r.bare_frac:.0%}]"
+                extra = f"  [{verdict}, bare {r.bare_frac:.0%}]"
             self.status.config(
                 text=f"{best.refdes}  {best.footprint}  {size}  "
                      f"rot {best.rot_deg:g}°{extra}  — {best.comment}")
@@ -415,7 +450,8 @@ class OverlayApp:
             except Exception as ex:
                 self.root.after(0, self._register_failed, path, str(ex))
                 continue
-            self.root.after(0, self._register_done, side, path, res)
+            self.root.after(0, self._register_done, side, path, res,
+                            rgb.shape[1])
         self.root.after(0, self._jobs_finished)
 
     def _jobs_finished(self):
@@ -427,7 +463,7 @@ class OverlayApp:
         messagebox.showerror("Registration failed",
                              f"{os.path.basename(path)}\n\n{msg}")
 
-    def _register_done(self, side: int, path: str, res):
+    def _register_done(self, side: int, path: str, res, photo_w: int):
         ax = self.axes[side]
         if self.images[side] is not None:
             self.images[side].remove()
@@ -441,6 +477,7 @@ class OverlayApp:
             img, extent=extent, zorder=1,
             alpha=self.alpha.get() / 100.0, interpolation="bilinear")
         self.warped[side] = res.warped_rgb
+        self.reg_info[side] = (path, res.homography, photo_w)
         self._clear_presence(side)
 
         self.settings[SIDE_KEYS[side]] = path
