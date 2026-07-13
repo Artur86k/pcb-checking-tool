@@ -129,8 +129,9 @@ class OverlayApp:
             ax.set_aspect("auto")
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=root)
-        self._at_home = True   # False once the user zooms/pans
-        self._fit_guard = 0    # draw-event refit loop breaker
+        self._at_home = True       # False once the user zooms/pans
+        self._fit_guard = 0        # draw-event refit loop breaker
+        self._nudge_pending = False  # canvas/widget size resync scheduled
 
         # Bottom-up packing: status bar, then buttons, then the matplotlib
         # toolbar are packed BEFORE the canvas — when the window is small,
@@ -548,11 +549,36 @@ class OverlayApp:
                 self._equalize(ax)
         self.canvas.draw_idle()
 
+    def _canvas_in_sync(self) -> bool:
+        """figure logical size x device-pixel-ratio must equal the Tk widget
+        size. On Windows with display scaling the ratio is only detected
+        after the window maps — a canvas sized before that renders larger
+        than the widget and gets clipped (looks like a cropped board)."""
+        tkw = self.canvas.get_tk_widget()
+        ratio = getattr(self.canvas, "device_pixel_ratio", 1.0)
+        fw, fh = self.canvas.get_width_height()
+        return (abs(fw * ratio - tkw.winfo_width()) <= 2
+                and abs(fh * ratio - tkw.winfo_height()) <= 2)
+
+    def _nudge_canvas(self):
+        """Re-deliver the actual widget size to matplotlib (same effect as
+        the maximize-and-back workaround)."""
+        self._nudge_pending = False
+        tkw = self.canvas.get_tk_widget()
+        if tkw.winfo_width() < 2 or self._canvas_in_sync():
+            return
+        event = type("E", (), {"width": tkw.winfo_width(),
+                               "height": tkw.winfo_height()})()
+        self.canvas.resize(event)
+
     def _on_draw(self, _event):
         """Self-heal the home view: the axes boxes are only final after a
         draw (Tk window mapping, constrained-layout passes), so verify the
         fit against the now-real layout and refit when it is off. Fixes the
         startup view with a restored window size."""
+        if not self._canvas_in_sync() and not self._nudge_pending:
+            self._nudge_pending = True
+            self.root.after(50, self._nudge_canvas)
         if not self._at_home or self.outline is None:
             return
         if self._fit_guard >= 3:  # settled/oscillating: leave it alone
