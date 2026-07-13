@@ -80,7 +80,12 @@ def _run(sel: list[Part], rois: list[np.ndarray], side: str,
         for i0 in range(0, len(crops), BATCH):
             batch = np.stack(crops[i0:i0 + BATCH]).astype(np.float32) / 255.0
             t = torch.from_numpy(batch.transpose(0, 3, 1, 2))
-            prob = torch.softmax(model(t), dim=1)[:, 1].numpy()
+            # flip-averaged prediction (presence is flip-invariant):
+            # stabilizes borderline small parts
+            prob = np.mean([
+                torch.softmax(model(v), dim=1)[:, 1].numpy()
+                for v in (t, t.flip(3), t.flip(2), t.flip(2).flip(3))],
+                axis=0)
             for p, m, pp in zip(sel[i0:i0 + BATCH], means[i0:i0 + BATCH], prob):
                 results[p.refdes] = PresenceResult(
                     part=p, bare_frac=float(1.0 - pp),

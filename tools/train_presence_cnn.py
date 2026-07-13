@@ -2,10 +2,13 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+
+from overlay_tool.pnp import load_pnp
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEST_PHOTOS = {"20260712_175150.jpg", "20260712_180923.dng"}
@@ -40,11 +43,16 @@ class Crops(Dataset):
                 img = img[:, ::-1]
             if rng.random() < 0.5:
                 img = img[::-1]
-            # small shift via pad+crop
-            p = 4
-            img = np.pad(img, ((p, p), (p, p), (0, 0)), mode="reflect")
-            ox, oy = rng.integers(0, 2 * p + 1, 2)
-            img = img[oy:oy + 64, ox:ox + 64]
+            # scale + shift: random sub-crop, resized back
+            s = int(rng.integers(52, 65))
+            oy, ox = rng.integers(0, 64 - s + 1, 2)
+            img = cv2.resize(np.ascontiguousarray(img[oy:oy + s, ox:ox + s]),
+                             (64, 64), interpolation=cv2.INTER_LINEAR)
+            # blur: capture sharpness varies a lot between photos; small
+            # parts on soft photos were misread as bare without this
+            if rng.random() < 0.5:
+                img = cv2.GaussianBlur(img, (0, 0),
+                                       float(rng.uniform(0.4, 1.8)))
             img = img * rng.uniform(0.8, 1.2) + rng.uniform(-0.08, 0.08)
             img += rng.uniform(-0.05, 0.05, size=3)  # per-channel color cast
             img = np.clip(img, 0, 1)
@@ -65,13 +73,27 @@ class Net(nn.Module):
         return self.f(x)
 
 net = Net()
-w = torch.tensor([len(y) / (y == 0).sum(), len(y) / (y == 1).sum()],
-                 dtype=torch.float32)
-crit = nn.CrossEntropyLoss(weight=w)
+crit = nn.CrossEntropyLoss()
 opt = torch.optim.Adam(net.parameters(), lr=1e-3)
-sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=15)
+EPOCHS = 25
+sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=EPOCHS)
+
+# Oversample by class AND footprint rarity: hundreds of 0402s dominate the
+# loss otherwise, and the few SOT343/BGA-6/X2SON sites (which look nothing
+# like chips) end up underfitted — those were the false 'missing' verdicts.
+fp_by_ref = {p.refdes: p.footprint
+             for p in load_pnp(BASE + "/pick_place/Pick Place for SNT_rev3_1.txt")}
+fp = np.array([fp_by_ref.get(r, "?") for r in refdes])
+fp_counts = {f: int((fp[train_m] == f).sum()) for f in np.unique(fp[train_m])}
+cls_counts = {c: int((y[train_m] == c).sum()) for c in (0, 1)}
+sample_w = np.array([
+    1.0 / np.sqrt(cls_counts[c]) / np.sqrt(fp_counts[f])
+    for c, f in zip(y[train_m], fp[train_m])])
+sampler = WeightedRandomSampler(torch.as_tensor(sample_w, dtype=torch.double),
+                                num_samples=int(train_m.sum()),
+                                replacement=True)
 train_dl = DataLoader(Crops(X[train_m], y[train_m], True), batch_size=128,
-                      shuffle=True, num_workers=0)
+                      sampler=sampler, num_workers=0)
 
 def evaluate(mask, name):
     net.eval()
@@ -89,7 +111,7 @@ def evaluate(mask, name):
           f"pop-recall {rec_pop:.3f} (n={mask.sum()})")
     return p
 
-for epoch in range(15):
+for epoch in range(EPOCHS):
     net.train()
     tot = n = 0
     for xb, yb in train_dl:
@@ -101,7 +123,7 @@ for epoch in range(15):
         n += len(yb)
     sched.step()
     print(f"epoch {epoch}: loss {tot/n:.4f}")
-    if epoch % 5 == 4 or epoch == 14:
+    if epoch % 5 == 4 or epoch == EPOCHS - 1:
         evaluate(testP_m, "test-photo")
         evaluate(testS_m, "test-site ")
 
