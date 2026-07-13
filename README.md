@@ -27,7 +27,7 @@ becomes an addressable ROI.
 ## Usage
 
 ```
-pip install opencv-python numpy matplotlib ezdxf rawpy pillow
+pip install opencv-python numpy matplotlib ezdxf rawpy pillow pandas openpyxl
 python -m overlay_tool [board_outline.dxf]
 ```
 
