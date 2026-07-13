@@ -41,7 +41,8 @@ PNP_TYPES = [("Pick & place", "*.txt *.csv"), ("All files", "*.*")]
 BOM_TYPES = [("BOM", "*.xlsx *.xls"), ("All files", "*.*")]
 
 SIDE_KEYS = ("top", "bottom")
-SIDE_NAMES = ("Top side", "Bottom side (bottom view)")
+SIDE_NAMES = ("TOP", "BOT (flipped)")
+TITLE_FONTSIZE = 8
 
 # The bottom plot is a true bottom view: photo as shot (readable), outline
 # and component frames mirrored (x -> -x) from the top-view frame.
@@ -121,8 +122,7 @@ class OverlayApp:
         self.presence: list[dict[str, PresenceResult]] = [{}, {}]
         self.absent_artists: list[list] = [[], []]
         for ax, name in zip(self.axes, SIDE_NAMES):
-            ax.set_title(name)
-            ax.set_xlabel("mm")
+            ax.set_title(name, fontsize=TITLE_FONTSIZE)
             # datalim: the axes box always fills its half of the window and
             # zooming pads the data range instead of shrinking the box
             ax.set_aspect("equal", adjustable="datalim")
@@ -238,7 +238,7 @@ class OverlayApp:
             self.outline_artists[i] = ax.add_collection(
                 LineCollection(segs, colors="magenta",
                                linewidths=1.2, zorder=3))
-            ax.set_title(name)
+            ax.set_title(name, fontsize=TITLE_FONTSIZE)
             xlims = sorted((sx * (outline.xmin - mx), sx * (outline.xmax + mx)))
             ax.set_xlim(*xlims)
             ax.set_ylim(outline.ymin - my, outline.ymax + my)
@@ -625,9 +625,10 @@ class OverlayApp:
 
         name = SIDE_NAMES[side]
         good = res.iou >= IOU_WARN
-        ax.set_title(f"{name} — {os.path.basename(path)}\n"
-                     f"fit IoU {res.iou:.3f}"
+        ax.set_title(f"{name} — {os.path.basename(path)} — "
+                     f"IoU {res.iou:.3f}"
                      + ("" if good else "  ⚠ check alignment"),
+                     fontsize=TITLE_FONTSIZE,
                      color="black" if good else "darkorange")
         self.status.config(
             text=f"{name}: {os.path.basename(path)} registered, IoU={res.iou:.3f}"
