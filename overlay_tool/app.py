@@ -451,6 +451,15 @@ class OverlayApp:
             text=f"Presence ({method}): {checked} checked — "
                  f"{len(missing)} missing, {len(extra)} unexpected"
                  + (f": {names}" if names else "") + bom_note + fit)
+        if missing or extra:
+            msg = ""
+            if missing:
+                msg += (f"NOT MOUNTED but required by the BOM "
+                        f"({len(missing)}):\n" + ", ".join(missing) + "\n\n")
+            if extra:
+                msg += (f"Mounted on DNP / unknown positions "
+                        f"({len(extra)}):\n" + ", ".join(extra))
+            messagebox.showwarning("Assembly errors found", msg.strip())
 
     def _draw_verdict_frames(self):
         """Green = board matches the BOM (mounted where expected, empty on

@@ -1,5 +1,11 @@
-"""Train the presence CNN on the multi-photo dataset."""
-import sys, os
+"""Train the presence CNN on the multi-photo dataset.
+
+Run tools/audit_labels.py first: sites where the photographed board
+credibly disagrees with the BOM (genuinely missing parts, stuffed DNP
+positions) are excluded from training, otherwise the CNN memorizes the
+wrong label and the defect passes as OK.
+"""
+import sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import cv2
@@ -26,9 +32,21 @@ uniq = np.unique(refdes)
 test_sites = set(rng.choice(uniq, size=int(0.12 * len(uniq)), replace=False))
 in_test_photo = np.isin(photo, list(TEST_PHOTOS))
 in_test_site = np.isin(refdes, list(test_sites))
-train_m = ~in_test_photo & ~in_test_site
-testP_m = in_test_photo & ~in_test_site
-testS_m = in_test_site & ~in_test_photo
+
+# label suspects (board disagrees with BOM): keep out of train AND eval
+sus_file = BASE + "/golden/label_suspects.json"
+if os.path.isfile(sus_file):
+    with open(sus_file, encoding="utf-8") as f:
+        suspects = set(json.load(f))
+    excl = np.isin(refdes, list(suspects))
+    print(f"excluding {len(suspects)} label-suspect refdes "
+          f"({int(excl.sum())} samples): {sorted(suspects)}")
+else:
+    excl = np.zeros(len(y), bool)
+
+train_m = ~in_test_photo & ~in_test_site & ~excl
+testP_m = in_test_photo & ~in_test_site & ~excl
+testS_m = in_test_site & ~in_test_photo & ~excl
 print(f"train {train_m.sum()}  test-photo {testP_m.sum()}  test-site {testS_m.sum()}")
 
 class Crops(Dataset):
