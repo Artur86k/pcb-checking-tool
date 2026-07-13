@@ -1,0 +1,11 @@
+# board design data & captures stay local (public repo)
+board_outline/
+bom/
+pick_place/
+pcb_photo_samples/
+debug/
+golden/
+
+__pycache__/
+*.pyc
+.venv/
