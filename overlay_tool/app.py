@@ -123,12 +123,13 @@ class OverlayApp:
         self.absent_artists: list[list] = [[], []]
         for ax, name in zip(self.axes, SIDE_NAMES):
             ax.set_title(name, fontsize=TITLE_FONTSIZE)
-            # datalim: the axes box always fills its half of the window and
-            # zooming pads the data range instead of shrinking the box
-            ax.set_aspect("equal", adjustable="datalim")
+            # aspect is managed manually (_fit_side/_equalize): the axes box
+            # always fills its half of the window, mm/px stays equal on both
+            # axes, and fitting pads the slack dimension instead of cropping
+            ax.set_aspect("auto")
 
         self.canvas = FigureCanvasTkAgg(self.fig, master=root)
-        self._home_views: list[tuple] = []  # per-axes (xlim, ylim) full view
+        self._at_home = True  # False once the user zooms/pans
 
         # Bottom-up packing: status bar, then buttons, then the matplotlib
         # toolbar are packed BEFORE the canvas — when the window is small,
@@ -174,6 +175,7 @@ class OverlayApp:
         self.canvas.mpl_connect("scroll_event", self._on_scroll)
         self.canvas.mpl_connect("button_press_event", self._on_press)
         self.canvas.mpl_connect("button_release_event", self._on_release)
+        self.canvas.mpl_connect("resize_event", self._on_resize)
 
         # Restore the previous session (CLI argument beats remembered path).
         dxf = dxf_override or self.settings.get("outline")
@@ -223,8 +225,6 @@ class OverlayApp:
         save_settings(self.settings)
         self.root.title(f"PCB Photo Overlay — {os.path.basename(path)}")
 
-        mx = 0.05 * (outline.xmax - outline.xmin)
-        my = 0.02 * (outline.ymax - outline.ymin)
         for i, (ax, name) in enumerate(zip(self.axes, SIDE_NAMES)):
             if self.images[i] is not None:
                 self.images[i].remove()
@@ -239,11 +239,8 @@ class OverlayApp:
                 LineCollection(segs, colors="magenta",
                                linewidths=1.2, zorder=3))
             ax.set_title(name, fontsize=TITLE_FONTSIZE)
-            xlims = sorted((sx * (outline.xmin - mx), sx * (outline.xmax + mx)))
-            ax.set_xlim(*xlims)
-            ax.set_ylim(outline.ymin - my, outline.ymax + my)
-        self._home_views = [(ax.get_xlim(), ax.get_ylim()) for ax in self.axes]
-        self.canvas.draw_idle()
+        self.canvas.draw()  # settle constrained_layout so box sizes are real
+        self.reset_view()
         self.status.config(text=f"Outline loaded: {os.path.basename(path)}")
 
         # Re-register the remembered photos against the (new) outline.
@@ -490,12 +487,57 @@ class OverlayApp:
                 a.set_visible(vis)
         self.canvas.draw_idle()
 
-    def reset_view(self):
-        if not self._home_views:
+    def _box_px(self, ax) -> tuple[float, float]:
+        """Axes box size in canvas pixels (from the current layout)."""
+        fw, fh = self.canvas.get_width_height()
+        bb = ax.get_position()
+        return max(bb.width * fw, 1.0), max(bb.height * fh, 1.0)
+
+    def _fit_side(self, i: int):
+        """Whole-board view for side i: equal mm/px filling the axes box,
+        padding (never cropping) the slack dimension."""
+        o = self.outline
+        if o is None:
             return
-        for ax, (xlim, ylim) in zip(self.axes, self._home_views):
-            ax.set_xlim(*xlim)
-            ax.set_ylim(*ylim)
+        ax = self.axes[i]
+        bw = (o.xmax - o.xmin) * 1.04 + 2.0
+        bh = (o.ymax - o.ymin) * 1.02 + 2.0
+        cx = SIDE_XSIGN[i] * (o.xmin + o.xmax) / 2
+        cy = (o.ymin + o.ymax) / 2
+        box_w, box_h = self._box_px(ax)
+        if bh / bw >= box_h / box_w:   # board taller than box: y limits
+            half_y = bh / 2
+            half_x = half_y * box_w / box_h
+        else:                          # board wider than box: x limits
+            half_x = bw / 2
+            half_y = half_x * box_h / box_w
+        ax.set_xlim(cx - half_x, cx + half_x)
+        ax.set_ylim(cy - half_y, cy + half_y)
+
+    def _equalize(self, ax):
+        """Re-assert equal mm/px after the axes box changed: keep the y view,
+        stretch/shrink the x range around its center to match the box."""
+        box_w, box_h = self._box_px(ax)
+        y0, y1 = ax.get_ylim()
+        x0, x1 = ax.get_xlim()
+        half_x = (y1 - y0) / box_h * box_w / 2
+        cx = (x0 + x1) / 2
+        ax.set_xlim(cx - half_x, cx + half_x)
+
+    def reset_view(self):
+        self._at_home = True
+        for i in range(2):
+            self._fit_side(i)
+        self.canvas.draw_idle()
+
+    def _on_resize(self, _event):
+        if self.outline is None:
+            return
+        for i, ax in enumerate(self.axes):
+            if self._at_home:
+                self._fit_side(i)
+            else:
+                self._equalize(ax)
         self.canvas.draw_idle()
 
     # ---- zoom (wheel) & pan (left-drag) --------------------------------------
@@ -504,6 +546,7 @@ class OverlayApp:
         ax = event.inaxes
         if ax not in tuple(self.axes) or event.xdata is None:
             return
+        self._at_home = False
         f = 1 / 1.25 if event.button == "up" else 1.25
         x0, x1 = ax.get_xlim()
         y0, y1 = ax.get_ylim()
@@ -517,6 +560,7 @@ class OverlayApp:
         # left-drag pans, unless a toolbar mode (zoom/pan) is armed
         if (event.button == 1 and not self.toolbar.mode
                 and event.inaxes in tuple(self.axes)):
+            self._at_home = False
             self._pan = (event.inaxes, event.x, event.y,
                          event.inaxes.get_xlim(), event.inaxes.get_ylim())
 
@@ -614,7 +658,7 @@ class OverlayApp:
             img = res.warped_rgb[:, ::-1]
             extent = (-o.xmax, -o.xmin, o.ymin, o.ymax)
         self.images[side] = ax.imshow(
-            img, extent=extent, zorder=1,
+            img, extent=extent, zorder=1, aspect="auto",
             alpha=self.alpha.get() / 100.0, interpolation="bilinear")
         self.warped[side] = res.warped_rgb
         self.reg_info[side] = (path, res.homography, photo_w)
