@@ -97,10 +97,16 @@ class OverlayApp:
         self.settings = load_settings()
         self.outline: Outline | None = None
         root.title("PCB Photo Overlay")
-        # fit the screen so the bottom controls are visible at startup
-        w = min(1000, root.winfo_screenwidth() - 60)
-        h = min(900, root.winfo_screenheight() - 100)
-        root.geometry(f"{w}x{h}")
+        # last session's window size/position, else fit the screen so the
+        # bottom controls are visible at startup
+        geo = self.settings.get("geometry")
+        if geo:
+            root.geometry(geo)
+        else:
+            w = min(1000, root.winfo_screenwidth() - 60)
+            h = min(900, root.winfo_screenheight() - 100)
+            root.geometry(f"{w}x{h}")
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.fig = Figure(figsize=(9, 8), constrained_layout=True)
         self.axes = self.fig.subplots(1, 2)
@@ -619,7 +625,8 @@ class OverlayApp:
 
         name = SIDE_NAMES[side]
         good = res.iou >= IOU_WARN
-        ax.set_title(f"{name} — fit IoU {res.iou:.3f}"
+        ax.set_title(f"{name} — {os.path.basename(path)}\n"
+                     f"fit IoU {res.iou:.3f}"
                      + ("" if good else "  ⚠ check alignment"),
                      color="black" if good else "darkorange")
         self.status.config(
@@ -635,6 +642,11 @@ class OverlayApp:
             if im is not None:
                 im.set_alpha(a)
         self.canvas.draw_idle()
+
+    def _on_close(self):
+        self.settings["geometry"] = self.root.winfo_geometry()
+        save_settings(self.settings)
+        self.root.destroy()
 
     def save_png(self):
         path = filedialog.asksaveasfilename(
