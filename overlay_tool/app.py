@@ -23,6 +23,7 @@ from matplotlib.figure import Figure
 
 from .outline import Outline, load_outline
 from .pnp import Part, load_pnp
+from .presence import PresenceResult, check_presence
 from .register import load_photo, register_photo
 
 IOU_WARN = 0.90  # below this, flag the fit as questionable
@@ -86,6 +87,9 @@ class OverlayApp:
         self.outline_artists = [None, None]
         self.parts: list[Part] = []
         self.frame_artists: list[list] = [[], []]  # LineCollections per side
+        self.warped: list = [None, None]           # registered photo per side
+        self.presence: list[dict[str, PresenceResult]] = [{}, {}]
+        self.absent_artists: list[list] = [[], []]
         for ax, name in zip(self.axes, SIDE_NAMES):
             ax.set_title(name)
             ax.set_xlabel("mm")
@@ -106,6 +110,7 @@ class OverlayApp:
             ("Open PCB top…", lambda: self.open_photo(0)),
             ("Open PCB bot…", lambda: self.open_photo(1)),
             ("Open P&P…", self.open_pnp),
+            ("Check presence", self.run_presence_check),
         ):
             b = tk.Button(bar, text=label, command=cmd)
             b.pack(side=tk.LEFT, padx=4)
@@ -185,6 +190,8 @@ class OverlayApp:
             if self.images[i] is not None:
                 self.images[i].remove()
                 self.images[i] = None
+            self.warped[i] = None
+            self._clear_presence(i)
             if self.outline_artists[i] is not None:
                 self.outline_artists[i].remove()
             sx = SIDE_XSIGN[i]
@@ -221,6 +228,8 @@ class OverlayApp:
             return
         self.settings["pnp"] = path
         save_settings(self.settings)
+        for i in range(2):
+            self._clear_presence(i)
         self._draw_frames()
         n_top = sum(1 for p in self.parts if p.side == "top")
         approx = sum(1 for p in self.parts if not p.size_exact)
@@ -258,6 +267,59 @@ class OverlayApp:
                 a.set_visible(self.show_frames.get())
             self.frame_artists[i] = artists
         self.canvas.draw_idle()
+
+    # ---- presence check ------------------------------------------------------
+
+    def run_presence_check(self):
+        """Flag not-mounted components: positions where the frame shows the
+        green solder mask instead of a part body (red frames)."""
+        if not self.parts:
+            messagebox.showinfo("No P&P", "Open a pick & place file first.")
+            return
+        if all(w is None for w in self.warped):
+            messagebox.showinfo("No photo", "Register at least one photo first.")
+            return
+        absent_all: list[str] = []
+        checked = 0
+        for i, side in enumerate(SIDE_KEYS):
+            if self.warped[i] is None:
+                continue
+            self.presence[i] = check_presence(
+                self.warped[i], self.outline, self.parts, side)
+            checked += len(self.presence[i])
+            absent_all += [r.part.refdes for r in self.presence[i].values()
+                           if not r.present]
+        self._draw_absent_frames()
+        names = ", ".join(sorted(absent_all))
+        if len(names) > 120:
+            names = names[:117] + "…"
+        self.status.config(
+            text=f"Presence: {checked} checked, {len(absent_all)} not mounted"
+                 + (f": {names}" if absent_all else "")
+                 + "  (hover a frame for details)")
+
+    def _draw_absent_frames(self):
+        for artists in self.absent_artists:
+            for a in artists:
+                a.remove()
+        self.absent_artists = [[], []]
+        for i in range(2):
+            segs = []
+            for r in self.presence[i].values():
+                if r.present:
+                    continue
+                c = r.part.corners() * (SIDE_XSIGN[i], 1.0)
+                segs.append(list(map(tuple, c)) + [tuple(c[0])])
+            if segs:
+                self.absent_artists[i] = [self.axes[i].add_collection(
+                    LineCollection(segs, colors="red", linewidths=1.6,
+                                   zorder=5))]
+        self.canvas.draw_idle()
+
+    def _clear_presence(self, side: int):
+        if self.presence[side]:
+            self.presence[side] = {}
+            self._draw_absent_frames()
 
     def _toggle_frames(self):
         vis = self.show_frames.get()
@@ -325,9 +387,14 @@ class OverlayApp:
             size = f"{best.length_mm:g}×{best.width_mm:g}mm"
             if not best.size_exact:
                 size += " (approx)"
+            extra = ""
+            r = self.presence[i].get(best.refdes)
+            if r is not None:
+                verdict = "mounted" if r.present else "NOT MOUNTED"
+                extra = f"  [{verdict}, mask {r.bare_frac:.0%}]"
             self.status.config(
                 text=f"{best.refdes}  {best.footprint}  {size}  "
-                     f"rot {best.rot_deg:g}°  — {best.comment}")
+                     f"rot {best.rot_deg:g}°{extra}  — {best.comment}")
 
     # ---- photo registration (background) ------------------------------------
 
@@ -373,6 +440,8 @@ class OverlayApp:
         self.images[side] = ax.imshow(
             img, extent=extent, zorder=1,
             alpha=self.alpha.get() / 100.0, interpolation="bilinear")
+        self.warped[side] = res.warped_rgb
+        self._clear_presence(side)
 
         self.settings[SIDE_KEYS[side]] = path
         save_settings(self.settings)

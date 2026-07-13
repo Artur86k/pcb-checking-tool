@@ -61,10 +61,11 @@ CHIP_IMPERIAL = {
 # Known packages (body only, no leads) -> (length, width) mm, exact-ish
 PACKAGES = {
     "SOT23": (2.9, 1.6), "SOT23-5": (2.9, 1.6), "SOT23-6": (2.9, 1.6),
-    "SC70": (2.0, 1.25), "SC70-5": (2.0, 1.25), "SC70-6": (2.0, 1.25),
+    # SC70-5 body is along Y at 0 deg in this library (photo-verified)
+    "SC70": (2.0, 1.25), "SC70-5": (1.25, 2.0), "SC70-6": (2.0, 1.25),
     "SOT343": (1.25, 2.0), "SOT416": (1.6, 0.8), "SOT523": (1.6, 0.8),
     "SOT563": (1.6, 1.2), "SOT883": (1.0, 0.6),
-    "SOD-323": (1.7, 1.3), "SOD-323HE": (1.7, 1.3),
+    "SOD-323": (1.7, 1.3), "SOD-323HE": (1.3, 1.7),  # HE body along Y at 0 deg
     "MSOP-8": (3.0, 3.0), "MSOP-8_PAD": (3.0, 3.0),
     "QSOP-16": (4.9, 3.9), "QFN-48": (7.0, 7.0),
     "TP0.5": (0.5, 0.5),
@@ -88,24 +89,30 @@ PACKAGES = {
     "SON-22__DQP-22": (5.0, 6.0), # TPS53318DQP
     # Small regulators / switches
     "SON-6": (2.0, 2.0),          # TPS62590/61160/60150 DRV
-    "SON-9": (2.0, 1.5),          # TPS61236RWL
+    "SON-9": (2.5, 2.5),          # TPS61236RWL (RWL0009 body 2.5x2.5)
     "SON-14": (3.0, 4.0),         # TPS63020DSJ
     "DQN_X2SON": (1.0, 1.0),      # LP5907SNX
     "MIC94064YMT": (2.0, 1.2),    # 6-pin Thin MLF
-    "XQFN16": (2.6, 1.8),         # 74AVCH4T245GU
+    "XQFN16": (1.8, 2.6),         # 74AVCH4T245GU, body along Y at 0 deg
     "12PIN_UQFN_1": (2.0, 1.7),   # TS3USBA225RUT
     "SOT416(SC-75)": (1.6, 0.8),
     "ESD0P4RFL": (1.0, 0.6),      # measured from board photo (SOD-882 size)
     "SM-22B": (4.1, 3.8),         # ETC4-1-2 / MABA transformers
+    "EXC34CG": (1.25, 2.0),       # Panasonic 0805-size CM filter, body along Y
     # Connectors / misc, sized from the registered board photos
     "DF40C-80DS-0.4V(51)": (17.4, 3.7),        # Hirose mezzanine
     "FH19C-12S-0.5SH(05)": (4.5, 5.5),         # FPC, body along Y at rot0
     "FH33-45S-0.5SH_reversed": (25.0, 3.5),    # display FPC
     "813-22-010-30-000101": (10.2, 4.1),       # Mill-Max 2x5 spring pins
     "TL4105": (2.5, 2.5),                      # side tact switch body
-    "SPM0687LR5H-1": (2.7, 2.5),               # microphone
+    "SPM0687LR5H-1": (3.76, 4.72),             # Knowles mic, body along Y at 0 deg
     "CASE_466-03": (5.5, 6.2),                 # MRF1518 / MW6S004 PLD-1.5
-    "NFBGA-60": (9.5, 7.0),                    # LMX9830 (module-size body)
+    "NFBGA-60": (9.0, 6.0),                    # LMX9830 (module-size body)
+    # DSBGA-6 bodies are along Y at 0 deg in this library (photo-verified);
+    # exact entries here override the WxH parsed from the name.
+    "BGA-6_1.2x0.8mm": (0.8, 1.2),             # SN74AUP2G17YFP / LMH2110TM
+    "BGA-6_1.4x0.9mm": (0.9, 1.4),             # SN74AUC1G08YZP
+    "BGA-8_1.6x0.9mm": (0.9, 1.6),
 }
 
 # Prefix-matched exact sizes (checked before chip-code rules; the Coilcraft
