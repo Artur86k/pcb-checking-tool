@@ -40,8 +40,13 @@ needed — any populated board is its own target.
 
 ## Presence check
 
-The **Check presence** button flags not-mounted components (red frames,
-hover for the score). Two backends:
+The **Check presence** button compares the board against the BOM (open it
+with **Open BOM…**; the "Не устанавливается" row defines DNP positions).
+Verdict frames: **green** = board matches the BOM (part mounted where
+expected, or DNP/not-in-BOM position empty); **red** = mismatch (expected
+part missing, or a part mounted on a DNP/unknown position). Hover a frame
+for the verdict and score. Without a BOM every position is treated as
+expected-populated. Two detection backends:
 
 - **CNN** (preferred): a small TorchScript classifier over body-aligned
   64×64 ROIs, used when `golden/presence_cnn.pt` exists and `torch` is

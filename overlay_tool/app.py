@@ -21,6 +21,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
 
+from .bom import BomItem, load_bom
 from .outline import Outline, load_outline
 from .pnp import Part, load_pnp
 from .presence import PresenceResult, check_presence
@@ -37,6 +38,7 @@ IMAGE_TYPES = [
 ]
 DXF_TYPES = [("DXF board outline", "*.dxf"), ("All files", "*.*")]
 PNP_TYPES = [("Pick & place", "*.txt *.csv"), ("All files", "*.*")]
+BOM_TYPES = [("BOM", "*.xlsx *.xls"), ("All files", "*.*")]
 
 SIDE_KEYS = ("top", "bottom")
 SIDE_NAMES = ("Top side", "Bottom side (bottom view)")
@@ -87,6 +89,7 @@ class OverlayApp:
         self.images = [None, None]  # AxesImage per side
         self.outline_artists = [None, None]
         self.parts: list[Part] = []
+        self.bom: dict[str, BomItem] | None = None
         self.frame_artists: list[list] = [[], []]  # LineCollections per side
         self.warped: list = [None, None]           # registered photo per side
         self.reg_info: list = [None, None]         # (path, homography, width)
@@ -112,6 +115,7 @@ class OverlayApp:
             ("Open PCB top…", lambda: self.open_photo(0)),
             ("Open PCB bot…", lambda: self.open_photo(1)),
             ("Open P&P…", self.open_pnp),
+            ("Open BOM…", self.open_bom),
             ("Check presence", self.run_presence_check),
         ):
             b = tk.Button(bar, text=label, command=cmd)
@@ -148,6 +152,9 @@ class OverlayApp:
         pnp = self.settings.get("pnp")
         if pnp and os.path.isfile(pnp):
             self.root.after(200, lambda: self.set_pnp(pnp))
+        bom = self.settings.get("bom")
+        if bom and os.path.isfile(bom):
+            self.root.after(300, lambda: self.set_bom(bom))
 
     # ---- file selection ----------------------------------------------------
 
@@ -270,6 +277,35 @@ class OverlayApp:
             self.frame_artists[i] = artists
         self.canvas.draw_idle()
 
+    # ---- BOM -----------------------------------------------------------------
+
+    def open_bom(self):
+        path = self._ask_open("Select BOM", BOM_TYPES, "bom")
+        if path:
+            self.set_bom(path)
+
+    def set_bom(self, path: str):
+        try:
+            self.bom = load_bom(path)
+        except Exception as ex:
+            messagebox.showerror("Cannot load BOM", f"{path}\n\n{ex}")
+            return
+        self.settings["bom"] = path
+        save_settings(self.settings)
+        n_dnp = sum(1 for b in self.bom.values() if b.dnp)
+        self.status.config(
+            text=f"BOM loaded: {len(self.bom)} positions, {n_dnp} DNP")
+        if any(self.presence):
+            self._draw_verdict_frames()  # re-color with BOM knowledge
+
+    def _expected_present(self, refdes: str) -> bool:
+        """True when the BOM says a part must be mounted here. Positions
+        missing from the BOM count as DNP (nothing should be mounted)."""
+        if self.bom is None:
+            return True  # no BOM: every P&P position is expected populated
+        b = self.bom.get(refdes)
+        return b is not None and not b.dnp
+
     # ---- presence check ------------------------------------------------------
 
     def run_presence_check(self):
@@ -289,7 +325,6 @@ class OverlayApp:
     def _presence_worker(self):
         use_cnn = presence_cnn.available()
         method = "CNN" if use_cnn else "color"
-        absent_all: list[str] = []
         checked = 0
         fit_notes: list[str] = []
         for i, side in enumerate(SIDE_KEYS):
@@ -328,10 +363,8 @@ class OverlayApp:
                                 "Presence check failed", str(ex))
                 continue
             checked += len(res)
-            absent_all += [r.part.refdes for r in res.values() if not r.present]
             self.root.after(0, self._presence_side_done, i, res)
-        self.root.after(0, self._presence_finished, checked,
-                        sorted(absent_all), method, fit_notes)
+        self.root.after(0, self._presence_finished, checked, method, fit_notes)
 
     def _apply_corrected_image(self, i: int, disp):
         """Swap the displayed photo for the distortion-corrected raster."""
@@ -344,44 +377,65 @@ class OverlayApp:
 
     def _presence_side_done(self, i: int, res: dict[str, PresenceResult]):
         self.presence[i] = res
-        self._draw_absent_frames()
+        self._draw_verdict_frames()
 
-    def _presence_finished(self, checked: int, absent_all: list[str],
-                           method: str, fit_notes: list[str] | None = None):
+    def _verdicts(self):
+        """(missing, extra) refdes lists: BOM expectation vs detection."""
+        missing, extra = [], []
+        for pres in self.presence:
+            for r in pres.values():
+                exp = self._expected_present(r.part.refdes)
+                if exp and not r.present:
+                    missing.append(r.part.refdes)
+                elif not exp and r.present:
+                    extra.append(r.part.refdes)
+        return sorted(missing), sorted(extra)
+
+    def _presence_finished(self, checked: int, method: str,
+                           fit_notes: list[str] | None = None):
         for b in self.buttons:
             b.config(state=tk.NORMAL)
-        names = ", ".join(absent_all)
-        if len(names) > 120:
-            names = names[:117] + "…"
+        missing, extra = self._verdicts()
+        names = ", ".join(missing + [f"{r}!" for r in extra])
+        if len(names) > 100:
+            names = names[:97] + "…"
         fit = f"  [distortion {', '.join(fit_notes)}]" if fit_notes else ""
+        bom_note = "" if self.bom is not None else "  (no BOM: DNP unknown)"
         self.status.config(
-            text=f"Presence ({method}): {checked} checked, "
-                 f"{len(absent_all)} not mounted"
-                 + (f": {names}" if absent_all else "")
-                 + fit + "  (hover a frame for details)")
+            text=f"Presence ({method}): {checked} checked — "
+                 f"{len(missing)} missing, {len(extra)} unexpected"
+                 + (f": {names}" if names else "") + bom_note + fit)
 
-    def _draw_absent_frames(self):
+    def _draw_verdict_frames(self):
+        """Green = board matches the BOM (mounted where expected, empty on
+        DNP/unknown positions); red = mismatch (missing or unexpected)."""
         for artists in self.absent_artists:
             for a in artists:
                 a.remove()
         self.absent_artists = [[], []]
         for i in range(2):
-            segs = []
+            ok, bad = [], []
             for r in self.presence[i].values():
-                if r.present:
-                    continue
                 c = r.part.corners() * (SIDE_XSIGN[i], 1.0)
-                segs.append(list(map(tuple, c)) + [tuple(c[0])])
-            if segs:
-                self.absent_artists[i] = [self.axes[i].add_collection(
-                    LineCollection(segs, colors="red", linewidths=1.6,
-                                   zorder=5))]
+                seg = list(map(tuple, c)) + [tuple(c[0])]
+                exp = self._expected_present(r.part.refdes)
+                (ok if r.present == exp else bad).append(seg)
+            artists = []
+            if ok:
+                artists.append(self.axes[i].add_collection(
+                    LineCollection(ok, colors="lime", linewidths=0.9,
+                                   zorder=5)))
+            if bad:
+                artists.append(self.axes[i].add_collection(
+                    LineCollection(bad, colors="red", linewidths=1.8,
+                                   zorder=6)))
+            self.absent_artists[i] = artists
         self.canvas.draw_idle()
 
     def _clear_presence(self, side: int):
         if self.presence[side]:
             self.presence[side] = {}
-            self._draw_absent_frames()
+            self._draw_verdict_frames()
 
     def _toggle_frames(self):
         vis = self.show_frames.get()
@@ -452,11 +506,22 @@ class OverlayApp:
             extra = ""
             r = self.presence[i].get(best.refdes)
             if r is not None:
-                verdict = "mounted" if r.present else "NOT MOUNTED"
+                exp = self._expected_present(best.refdes)
+                if r.present == exp:
+                    verdict = "OK mounted" if r.present else "OK empty"
+                else:
+                    verdict = "MISSING" if exp else "UNEXPECTED PART"
                 extra = f"  [{verdict}, bare {r.bare_frac:.0%}]"
+            bnote = ""
+            if self.bom is not None:
+                b = self.bom.get(best.refdes)
+                if b is None:
+                    bnote = "  (not in BOM)"
+                elif b.dnp:
+                    bnote = "  (DNP)"
             self.status.config(
                 text=f"{best.refdes}  {best.footprint}  {size}  "
-                     f"rot {best.rot_deg:g}°{extra}  — {best.comment}")
+                     f"rot {best.rot_deg:g}°{extra}{bnote}  — {best.comment}")
 
     # ---- photo registration (background) ------------------------------------
 
