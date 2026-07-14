@@ -118,3 +118,9 @@ condition the model has seen makes it more robust.
 - **Threshold 0.5** favors catching missing parts (bare called "present"
   is the dangerous error); lowering it trades fewer false alarms for more
   missed defects.
+- **Crop margin 0.7 mm** around the body — the crop then covers pads,
+  solder fillets and silkscreen, which carry much of the mounted/bare
+  signal. Chosen by ablation (false verdicts per photo: 0.2 mm → 4.9,
+  0.4 mm → 4.3, **0.7 mm → 2.3**, 1.0 mm → 3.5). If you change it in
+  `build_presence_dataset.py`, change `presence_cnn.MARGIN_MM` to match —
+  the deployed model and the inference crops must use the same margin.

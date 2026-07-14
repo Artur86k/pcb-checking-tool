@@ -24,7 +24,11 @@ from .presence import PresenceResult, extract_roi
 MODEL_FILE = os.path.join("golden", "presence_cnn.pt")
 INPUT_SIZE = 64
 PPMM = 20.0
-MARGIN_MM = 0.4
+# margin around the body rectangle so the crop covers pads, solder
+# fillets and silkscreen — 0.7 mm won a margin ablation (halves false
+# verdicts vs 0.4; 0.2 and 1.0 are both worse). MUST match the margin
+# the deployed model was trained with (tools/build_presence_dataset.py).
+MARGIN_MM = 0.7
 BATCH = 256
 
 _model = None

@@ -20,7 +20,13 @@ KNOWN = {"top": BASE + "/pcb_photo_samples/20260712_174803.jpg",
          "bottom": BASE + "/pcb_photo_samples/20260712_180418.dng"}
 SIZE = 64
 PPMM = 20.0
-MARGIN = 0.4
+# margin around the body rectangle: covers pads, fillets and silkscreen.
+# 0.7 chosen by ablation (0.2/0.4/0.7/1.0); must match
+# presence_cnn.MARGIN_MM at inference.
+# usage: build_presence_dataset.py [margin_mm] [output.npz]
+MARGIN = float(sys.argv[1]) if len(sys.argv) > 1 else 0.7
+OUT = sys.argv[2] if len(sys.argv) > 2 else BASE + "/golden/presence_dataset.npz"
+print(f"margin {MARGIN} mm -> {OUT}")
 
 o = load_outline(BASE + "/board_outline/SNT_rev3_1_board_outline.DXF")
 parts = load_pnp(BASE + "/pick_place/Pick Place for SNT_rev3_1.txt")
@@ -96,7 +102,7 @@ for path, side, r in photos:
         sides.append(side)
     print(os.path.basename(path), "done", len(X))
 
-np.savez_compressed(BASE + "/golden/presence_dataset.npz",
+np.savez_compressed(OUT,
                     X=np.stack(X), y=np.array(y),
                     refdes=np.array(ref_ids), photo=np.array(photo_ids),
                     side=np.array(sides))

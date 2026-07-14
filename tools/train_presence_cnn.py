@@ -23,7 +23,10 @@ SEED = 0
 rng = np.random.default_rng(SEED)
 torch.manual_seed(SEED)
 
-d = np.load(BASE + "/golden/presence_dataset.npz")
+# usage: train_presence_cnn.py [dataset.npz] [model_out.pt]
+DATASET = sys.argv[1] if len(sys.argv) > 1 else BASE + "/golden/presence_dataset.npz"
+MODEL_OUT = sys.argv[2] if len(sys.argv) > 2 else BASE + "/golden/presence_cnn.pt"
+d = np.load(DATASET)
 X, y = d["X"], d["y"].astype(np.int64)
 refdes, photo = d["refdes"], d["photo"]
 
@@ -168,5 +171,5 @@ from collections import Counter
 print("test-photo errors by refdes:",
       Counter(zip(refdes[errP], y[errP])).most_common(20))
 
-torch.jit.script(net).save(BASE + "/golden/presence_cnn.pt")
-print("saved golden/presence_cnn.pt")
+torch.jit.script(net).save(MODEL_OUT)
+print("saved", MODEL_OUT)
