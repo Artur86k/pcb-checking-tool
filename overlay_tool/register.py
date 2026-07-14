@@ -64,15 +64,42 @@ def load_photo(path: str, max_dim: int = MAX_PHOTO_DIM) -> np.ndarray:
 
 
 def segment_board(rgb: np.ndarray) -> np.ndarray:
-    """Binary mask of the board (largest bright object on dark background)."""
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    v = hsv[:, :, 2]
-    sat = hsv[:, :, 1]
-    # Board (green solder mask / gold) is both brighter and more saturated
-    # than the dark fabric; take the union of the two Otsu splits.
-    _, mv = cv2.threshold(v, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    _, ms = cv2.threshold(sat, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    m = cv2.bitwise_or(mv, ms)
+    """Binary mask of the board: largest blob distinct from the background.
+
+    The background color is estimated from the image border (the board is
+    never flush against the frame edge), and pixels are classified by Lab
+    color distance to it — works for dark fabric, blue plastic, any
+    roughly uniform backdrop.
+    """
+    lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
+    h, w = lab.shape[:2]
+    b = max(8, int(0.04 * min(h, w)))
+    border = np.concatenate([
+        lab[:b].reshape(-1, 3), lab[-b:].reshape(-1, 3),
+        lab[:, :b].reshape(-1, 3), lab[:, -b:].reshape(-1, 3)])
+    bg = np.median(border, axis=0)
+    bg_chroma = float(np.hypot(bg[1] - 128.0, bg[2] - 128.0))
+    if bg_chroma < 12.0:
+        # neutral (gray/black fabric) backdrop: board is brighter and more
+        # saturated — union of the two Otsu splits (proven on such shots)
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
+        _, mv = cv2.threshold(hsv[:, :, 2], 0, 255,
+                              cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, ms = cv2.threshold(hsv[:, :, 1], 0, 255,
+                              cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        m = cv2.bitwise_or(mv, ms)
+    else:
+        # colored backdrop (blue plastic): chroma-only (a,b) distance to
+        # the border-estimated background color — lightness varies with
+        # vignetting/shadows, chroma stays put. Threshold from the
+        # border's own spread (Otsu fails when the board has two
+        # appearance modes, green mask vs gold, and splits between them).
+        dist = np.linalg.norm(lab[:, :, 1:] - bg[1:], axis=2)
+        border_dist = np.concatenate([
+            dist[:b].ravel(), dist[-b:].ravel(),
+            dist[:, :b].ravel(), dist[:, -b:].ravel()])
+        t = max(1.5 * float(np.percentile(border_dist, 99.0)), 10.0)
+        m = (dist > t).astype(np.uint8) * 255
 
     # Open FIRST: fabric texture passes Otsu as speckle, and closing would
     # merge it into the board. Holes inside the board are handled by the

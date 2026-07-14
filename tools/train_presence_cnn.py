@@ -33,13 +33,17 @@ test_sites = set(rng.choice(uniq, size=int(0.12 * len(uniq)), replace=False))
 in_test_photo = np.isin(photo, list(TEST_PHOTOS))
 in_test_site = np.isin(refdes, list(test_sites))
 
-# label suspects (board disagrees with BOM): keep out of train AND eval
+# label suspects (unit disagrees with BOM): keep out of train AND eval.
+# Keys are "unit:refdes" (unit = photo date prefix); bare refdes accepted
+# for backward compatibility.
 sus_file = BASE + "/golden/label_suspects.json"
 if os.path.isfile(sus_file):
     with open(sus_file, encoding="utf-8") as f:
         suspects = set(json.load(f))
-    excl = np.isin(refdes, list(suspects))
-    print(f"excluding {len(suspects)} label-suspect refdes "
+    unit_ref = np.array([f"{p.split('_')[0]}:{r}"
+                         for p, r in zip(photo, refdes)])
+    excl = np.isin(unit_ref, list(suspects)) | np.isin(refdes, list(suspects))
+    print(f"excluding {len(suspects)} label suspects "
           f"({int(excl.sum())} samples): {sorted(suspects)}")
 else:
     excl = np.zeros(len(y), bool)

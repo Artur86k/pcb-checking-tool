@@ -58,8 +58,12 @@ for path in sorted(glob.glob(BASE + "/pcb_photo_samples/*")):
         if best is None or c > best[2]:
             best = (side, r, c)
     name = os.path.basename(path)
-    if best is None or best[2] < 0.5 or best[1].iou < 0.95:
-        print(f"skip {name}: corr={0 if best is None else round(best[2],2)}")
+    # corr gate rejects photos of OTHER board designs: a sibling product
+    # with a similar outline registers fine (IoU ~0.95) but its content
+    # correlation stays ~0.2, while true SNT photos score >= 0.4
+    if best is None or best[2] < 0.35 or best[1].iou < 0.95:
+        print(f"skip {name}: corr={0 if best is None else round(best[2],2)} "
+              f"(different design or bad registration)")
         continue
     photos.append((path, best[0], best[1]))
     print(f"{name}: {best[0]} corr={best[2]:.2f} iou={best[1].iou:.3f}")

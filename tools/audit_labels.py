@@ -113,19 +113,25 @@ for k, held in enumerate(folds):
             oof[idx] = p
     print(f"fold {k + 1}/{FOLDS} done ({int(te.sum())} samples)")
 
+# consensus per (unit, refdes): different physical units can differ in
+# which BOM-required parts are actually mounted
+unit = np.array([p.split("_")[0] for p in photo])
 suspects = {}
-for ref in np.unique(refdes):
-    m = refdes == ref
-    mp = float(np.nanmean(oof[m]))
-    label = int(y[m][0])
-    if label == 1 and mp < BARE_CONSENSUS:
-        suspects[ref] = {"bom": "populated", "looks": "bare", "mean_p": round(mp, 3)}
-    elif label == 0 and mp > PRESENT_CONSENSUS:
-        suspects[ref] = {"bom": "DNP", "looks": "present", "mean_p": round(mp, 3)}
+for u in np.unique(unit):
+    for ref in np.unique(refdes[unit == u]):
+        m = (refdes == ref) & (unit == u)
+        mp = float(np.nanmean(oof[m]))
+        label = int(y[m][0])
+        if label == 1 and mp < BARE_CONSENSUS:
+            suspects[f"{u}:{ref}"] = {"bom": "populated", "looks": "bare",
+                                      "mean_p": round(mp, 3)}
+        elif label == 0 and mp > PRESENT_CONSENSUS:
+            suspects[f"{u}:{ref}"] = {"bom": "DNP", "looks": "present",
+                                      "mean_p": round(mp, 3)}
 
-print(f"\n{len(suspects)} label suspects (board disagrees with BOM):")
-for ref, info in sorted(suspects.items(), key=lambda kv: kv[1]["mean_p"]):
-    print(f"  {ref}: BOM {info['bom']} but looks {info['looks']} "
+print(f"\n{len(suspects)} label suspects (unit disagrees with BOM):")
+for key, info in sorted(suspects.items(), key=lambda kv: kv[1]["mean_p"]):
+    print(f"  {key}: BOM {info['bom']} but looks {info['looks']} "
           f"(mean p(present) {info['mean_p']})")
 
 out = BASE + "/golden/label_suspects.json"
