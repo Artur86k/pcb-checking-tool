@@ -58,6 +58,7 @@ expected-populated. Two detection backends:
   photographed unit credibly disagrees with the BOM — genuinely missing
   parts must not be learned as "populated"), then
   `tools/train_presence_cnn.py`.
+  Step-by-step training instruction: [docs/training.md](docs/training.md).
   Unlike color rules it survives green interposer-mounted BGAs and
   translucent passives (~98% held-out accuracy on a 17-photo set).
 - **Color heuristic** (fallback): fraction of solder-mask-colored pixels
