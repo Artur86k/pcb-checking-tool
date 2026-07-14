@@ -363,6 +363,22 @@ class OverlayApp:
                 "mark DNP positions — the BOM DNP list is more complete.\n\n"
                 "Open a BOM now?"):
             self.open_bom()
+        if not presence_cnn.available():
+            try:
+                import torch  # noqa: F401
+                reason = ("the model file golden/presence_cnn.pt was not "
+                          "found (it is machine-local — copy it from the "
+                          "PC where the CNN was trained, or retrain: see "
+                          "docs/training.md)")
+            except ImportError:
+                reason = "the 'torch' package is not installed"
+            if not messagebox.askyesno(
+                    "CNN unavailable — results will be unreliable",
+                    f"The CNN presence classifier cannot be used because "
+                    f"{reason}.\n\nThe fallback color heuristic produces "
+                    f"MANY false verdicts (hundreds on a large board).\n\n"
+                    f"Run the check anyway?"):
+                return
         for b in self.buttons:
             b.config(state=tk.DISABLED)
         threading.Thread(target=self._presence_worker, daemon=True).start()
@@ -459,7 +475,13 @@ class OverlayApp:
             if extra:
                 msg += (f"Mounted on DNP / unknown positions "
                         f"({len(extra)}):\n" + ", ".join(extra))
-            messagebox.showwarning("Assembly errors found", msg.strip())
+            if method != "CNN":
+                msg += ("\n\n⚠ Checked with the fallback color heuristic — "
+                        "most of these are likely false. Install torch and "
+                        "provide golden/presence_cnn.pt for reliable "
+                        "verdicts (docs/training.md).")
+            messagebox.showwarning(f"Assembly errors found ({method})",
+                                   msg.strip())
 
     def _draw_verdict_frames(self):
         """Green = board matches the BOM (mounted where expected, empty on
