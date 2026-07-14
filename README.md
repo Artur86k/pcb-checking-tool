@@ -67,6 +67,7 @@ expected-populated. Two detection backends:
 
 ```
 pip install opencv-python numpy matplotlib ezdxf rawpy pillow pandas openpyxl
+pip install torch   # optional: CNN presence backend + tools/ training scripts
 python -m overlay_tool [board_outline.dxf]
 ```
 
