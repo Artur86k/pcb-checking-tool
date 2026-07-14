@@ -372,6 +372,11 @@ class OverlayApp:
                           "docs/training.md)")
             except ImportError:
                 reason = "the 'torch' package is not installed"
+            except Exception as ex:
+                reason = (f"torch is installed but failed to load "
+                          f"({type(ex).__name__}) — usually the missing "
+                          f"Microsoft Visual C++ runtime; install "
+                          f"vc_redist.x64.exe or the CPU torch wheel")
             if not messagebox.askyesno(
                     "CNN unavailable — results will be unreliable",
                     f"The CNN presence classifier cannot be used because "
