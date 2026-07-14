@@ -60,9 +60,11 @@ def part_to_photo_homography(part: Part, outline: Outline,
     a = math.radians(part.rot_deg)
     c, s = math.cos(a), math.sin(a)
 
+    cx0, cy0 = part.center()
+
     def raster(u, v):
-        x = part.x_mm + u * c - v * s
-        y = part.y_mm + u * s + v * c
+        x = cx0 + u * c - v * s
+        y = cy0 + u * s + v * c
         return ((x - outline.xmin) * outline.scale,
                 (outline.ymax - y) * outline.scale)
 
@@ -160,9 +162,11 @@ def extract_frame_patch(warped_rgb: np.ndarray, outline: Outline, part: Part,
     hl = part.length_mm / 2 + margin_mm
     hw = part.width_mm / 2 + margin_mm
 
+    cx0, cy0 = part.center()
+
     def raster(u: float, v: float) -> tuple[float, float]:
-        x = part.x_mm + u * c - v * s
-        y = part.y_mm + u * s + v * c
+        x = cx0 + u * c - v * s
+        y = cy0 + u * s + v * c
         return ((x - outline.xmin) * outline.scale,
                 (outline.ymax - y) * outline.scale)
 

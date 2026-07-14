@@ -30,6 +30,16 @@ class Part:
     length_mm: float          # body size along X at rot=0
     width_mm: float           # body size along Y at rot=0
     size_exact: bool          # False -> size is a guess
+    ox_mm: float = 0.0        # pattern center offset from the P&P origin,
+    oy_mm: float = 0.0        # part-local frame (some connectors are placed
+                              # by pin 1, not by the pattern center)
+
+    def center(self) -> tuple[float, float]:
+        """Pattern center in board-mm (P&P origin + rotated local offset)."""
+        a = math.radians(self.rot_deg)
+        c, s = math.cos(a), math.sin(a)
+        return (self.x_mm + self.ox_mm * c - self.oy_mm * s,
+                self.y_mm + self.ox_mm * s + self.oy_mm * c)
 
     def corners(self) -> np.ndarray:
         """Body rectangle corners (4,2) in board-mm, top-view frame.
@@ -41,10 +51,11 @@ class Part:
         """
         a = math.radians(self.rot_deg)
         c, s = math.cos(a), math.sin(a)
+        cx, cy = self.center()
         hl = self.length_mm / 2 + FRAME_MARGIN_MM
         hw = self.width_mm / 2 + FRAME_MARGIN_MM
         return np.array([
-            (self.x_mm + dx * c - dy * s, self.y_mm + dx * s + dy * c)
+            (cx + dx * c - dy * s, cy + dx * s + dy * c)
             for dx, dy in ((-hl, -hw), (hl, -hw), (hl, hw), (-hl, hw))
         ])
 
@@ -67,7 +78,7 @@ PACKAGES = {
     "SOT563": (1.6, 1.2), "SOT883": (1.0, 0.6),
     "SOD-323": (1.7, 1.3), "SOD-323HE": (1.3, 1.7),  # HE body along Y at 0 deg
     "MSOP-8": (3.0, 3.0), "MSOP-8_PAD": (3.0, 3.0),
-    "QSOP-16": (4.9, 3.9), "QFN-48": (7.0, 7.0),
+    "QSOP-16": (4.9, 6.0), "QFN-48": (7.0, 7.0),  # QSOP width incl. pins
     "TP0.5": (0.5, 0.5),
     "LED_0603": (0.8, 1.6), "LED_0606": (1.6, 1.6),  # LED body along Y at 0 deg
     # Tantalum footprints in this library have the body along Y at 0 deg
@@ -77,7 +88,7 @@ PACKAGES = {
     "ABM10AIG": (2.5, 2.0), "ABS05": (1.6, 1.0),
     "XFL4020": (4.0, 4.0), "IHLP2020BZ": (5.2, 5.5), "IHLP2525BD": (6.5, 6.9),
     "POWERPAK_1212-8": (3.3, 3.3), "U.FL-R-SMT": (2.6, 2.6),
-    "H.FL": (3.0, 3.0),
+    "H.FL": (3.4, 3.4),           # body incl. legs, photo-measured
     "L_MIDI": (5.5, 5.5),
     # Large ICs sized from the part datasheets (body, not courtyard)
     "BGA-484": (23.0, 23.0),      # XC7A200T-FBG484
@@ -100,10 +111,12 @@ PACKAGES = {
     "SM-22B": (4.1, 3.8),         # ETC4-1-2 / MABA transformers
     "EXC34CG": (1.25, 2.0),       # Panasonic 0805-size CM filter, body along Y
     # Connectors / misc, sized from the registered board photos
+    # 4-tuples: (length, width, ox, oy) — pattern center offset from the
+    # P&P origin in the part-local frame (placed by pin 1, not center)
     "DF40C-80DS-0.4V(51)": (17.4, 3.7),        # Hirose mezzanine
-    "FH19C-12S-0.5SH(05)": (4.5, 5.5),         # FPC, body along Y at rot0
+    "FH19C-12S-0.5SH(05)": (7.6, 4.6, -0.45, -0.55),  # FPC incl. contacts
     "FH33-45S-0.5SH_reversed": (25.0, 3.5),    # display FPC
-    "813-22-010-30-000101": (10.2, 4.1),       # Mill-Max 2x5 spring pins
+    "813-22-010-30-000101": (10.9, 5.7, 0.0, 2.65),  # Mill-Max 2x5 pads
     "TL4105": (2.5, 2.5),                      # side tact switch body
     "SPM0687LR5H-1": (3.76, 4.72),             # Knowles mic, body along Y at 0 deg
     "CASE_466-03": (5.5, 6.2),                 # MRF1518 / MW6S004 PLD-1.5
@@ -136,15 +149,17 @@ _CHIP_RE = re.compile(r"^(?:L_)?(\d{4})(C|R|L|CS|C_HIGHCAP|CS_[a-z]+|L_.*)?$",
 DEFAULT_SIZE = (2.0, 2.0)
 
 
-def footprint_size(fp: str) -> tuple[float, float, bool]:
-    """Return (length_mm, width_mm, exact) for a footprint name."""
+def footprint_size(fp: str):
+    """Return (length_mm, width_mm, exact, ox_mm, oy_mm) for a footprint."""
     if fp in PACKAGES:
-        l, w = PACKAGES[fp]
-        return l, w, True
+        entry = PACKAGES[fp]
+        l, w = entry[0], entry[1]
+        ox, oy = (entry[2], entry[3]) if len(entry) == 4 else (0.0, 0.0)
+        return l, w, True, ox, oy
 
     for key, (l, w) in PREFIX_PACKAGES.items():
         if fp.upper().startswith(key.upper()):
-            return l, w, True
+            return l, w, True, 0.0, 0.0
 
     # Explicit dimensions anywhere in the name, e.g. QFN-16_3X3MM,
     # DFN-16_4x1.6, BGA-6_1.2x0.8mm, 1806L_(4.5X1.6), LGA24_3.5x3x1
@@ -152,7 +167,7 @@ def footprint_size(fp: str) -> tuple[float, float, bool]:
     if m:
         l, w = float(m.group(1)), float(m.group(2))
         if 0.2 <= l <= 60 and 0.2 <= w <= 60:
-            return l, w, True
+            return l, w, True, 0.0, 0.0
 
     # Chip-style 4-digit codes. Imperial codes come from the table; other
     # codes (e.g. 2016L, 2520) are metric: 2016 -> 2.0 x 1.6 mm.
@@ -169,15 +184,16 @@ def footprint_size(fp: str) -> tuple[float, float, bool]:
         else:
             l, w = int(code[:2]) / 10.0, int(code[2:]) / 10.0
         if 0.2 <= w <= l <= 60:
-            return (w, l, True) if swap else (l, w, True)
+            return ((w, l, True, 0.0, 0.0) if swap
+                    else (l, w, True, 0.0, 0.0))
 
     # Fuzzy: known package as a prefix (SOT23-5X handled above; catches
     # variants like "SON-6", "SOT523" already exact-matched).
-    for key, (l, w) in PACKAGES.items():
+    for key, entry in PACKAGES.items():
         if fp.upper().startswith(key.upper()):
-            return l, w, False
+            return entry[0], entry[1], False, 0.0, 0.0
 
-    return DEFAULT_SIZE[0], DEFAULT_SIZE[1], False
+    return DEFAULT_SIZE[0], DEFAULT_SIZE[1], False, 0.0, 0.0
 
 
 _ROW_RE = re.compile(
@@ -209,10 +225,10 @@ def load_pnp(path: str) -> list[Part]:
             continue
         refdes, comment, layer, fp = m.group(1), m.group(2).strip('"'), m.group(3), m.group(4)
         x, y, rot = float(m.group(5)), float(m.group(6)), float(m.group(7))
-        l, w, exact = footprint_size(fp)
+        l, w, exact, ox, oy = footprint_size(fp)
         parts.append(Part(refdes, comment,
                           "top" if layer == "TopLayer" else "bottom",
-                          fp, x, y, rot, l, w, exact))
+                          fp, x, y, rot, l, w, exact, ox, oy))
     if not parts:
         raise ValueError(f"No components parsed from {path}")
     return parts

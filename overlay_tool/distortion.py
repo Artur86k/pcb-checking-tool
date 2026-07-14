@@ -177,9 +177,11 @@ def extract_patch(raster: np.ndarray, outline: Outline, part: Part,
     hl = part.length_mm / 2 + margin_mm
     hw = part.width_mm / 2 + margin_mm
 
+    cx0, cy0 = part.center()
+
     def px(u, v):
-        x = part.x_mm + u * c - v * s
-        y = part.y_mm + u * s + v * c
+        x = cx0 + u * c - v * s
+        y = cy0 + u * s + v * c
         return ((x - outline.xmin) * ppmm, (outline.ymax - y) * ppmm)
 
     w_px = max(2, int(round(2 * hl * ppmm)))
