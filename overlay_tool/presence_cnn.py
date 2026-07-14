@@ -46,7 +46,9 @@ def available(path: str | None = None) -> bool:
     try:
         import torch  # noqa: F401
         return True
-    except ImportError:
+    except Exception:
+        # not just ImportError: a broken install raises OSError (missing
+        # VC++ runtime DLLs) — fall back to the color heuristic either way
         return False
 
 
