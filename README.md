@@ -10,6 +10,8 @@ silhouettes) and warped into the outline's mm frame. A pick-and-place file
 projects every component's body rectangle onto the photo, so each refdes
 becomes an addressable ROI.
 
+**Detailed description and working scheme: [docs/how-it-works.md](docs/how-it-works.md)**
+
 ## Features
 
 - **Registration**: board segmentation → minAreaRect coarse align (4 rotations
