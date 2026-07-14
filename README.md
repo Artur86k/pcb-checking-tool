@@ -64,11 +64,23 @@ expected-populated. Two detection backends:
 - **Color heuristic** (fallback): fraction of solder-mask-colored pixels
   inside the body frame.
 
+## Installation
+
+Windows: run **`install.bat`** (installs everything from
+`requirements.txt` and verifies the setup, including whether the CNN
+model is in place). Any OS, manually:
+
+```
+pip install -r requirements.txt
+python tools/check_install.py
+```
+
+torch is only needed for the CNN presence backend and the training
+scripts; without it the app runs with the color-heuristic fallback.
+
 ## Usage
 
 ```
-pip install opencv-python numpy matplotlib ezdxf rawpy pillow pandas openpyxl
-pip install torch   # optional: CNN presence backend + tools/ training scripts
 python -m overlay_tool [board_outline.dxf]
 ```
 

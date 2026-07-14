@@ -1,0 +1,9 @@
+opencv-python
+numpy
+matplotlib
+ezdxf
+rawpy
+pillow
+pandas
+openpyxl
+torch
