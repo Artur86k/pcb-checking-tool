@@ -116,7 +116,9 @@ PACKAGES = {
     "DF40C-80DS-0.4V(51)": (17.4, 3.7),        # Hirose mezzanine
     "FH19C-12S-0.5SH(05)": (7.6, 4.6, -0.45, -0.55),  # FPC incl. contacts
     "FH33-45S-0.5SH_reversed": (25.0, 3.5),    # display FPC
-    "813-22-010-30-000101": (10.9, 5.7, 0.0, 2.65),  # Mill-Max 2x5 pads
+    # Mill-Max 2x5 spring-pin pads, envelope photo-measured; origin is the
+    # pin-1 row center, pattern center 1.6 mm toward the second row
+    "813-22-010-30-000101": (12.8, 5.0, 0.0, 1.6),
     "TL4105": (2.5, 2.5),                      # side tact switch body
     "SPM0687LR5H-1": (3.76, 4.72),             # Knowles mic, body along Y at 0 deg
     "CASE_466-03": (5.5, 6.2),                 # MRF1518 / MW6S004 PLD-1.5
