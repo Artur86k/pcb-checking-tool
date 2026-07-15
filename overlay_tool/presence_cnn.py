@@ -12,6 +12,7 @@ CNN path can be used; callers fall back to the color heuristic otherwise.
 
 from __future__ import annotations
 
+import json
 import os
 
 import cv2
@@ -27,12 +28,28 @@ PPMM = 20.0
 # margin around the body rectangle so the crop covers pads, solder
 # fillets and silkscreen — 0.7 mm won a margin ablation (halves false
 # verdicts vs 0.4; 0.2 and 1.0 are both worse). MUST match the margin
-# the deployed model was trained with (tools/build_presence_dataset.py).
+# the deployed model was trained with: the authoritative value is the
+# "<model>.json" sidecar written by tools/train_presence_cnn.py; this
+# constant is only the fallback for models without one. A mismatch is
+# catastrophic (a stale 0.4-margin model inferred at 0.7 called ~130
+# populated parts bare per photo).
 MARGIN_MM = 0.7
 BATCH = 256
 
 _model = None
 _model_path = None
+
+
+def model_margin(path: str | None = None) -> float:
+    """Crop margin the deployed model was trained with."""
+    p = _find_model(path)
+    if p:
+        try:
+            with open(os.path.splitext(p)[0] + ".json", encoding="utf-8") as f:
+                return float(json.load(f)["margin_mm"])
+        except (OSError, ValueError, KeyError):
+            pass
+    return MARGIN_MM
 
 
 def _find_model(path: str | None = None) -> str | None:
@@ -110,8 +127,9 @@ def classify(full_rgb: np.ndarray, outline: Outline, parts: list[Part],
     result type as the color heuristic; `bare_frac` holds 1 - p(present).
     """
     sel = _select(outline, parts, side)
+    margin = model_margin(model_path)
     rois = [extract_roi(full_rgb, p, outline, photo_h, photo_scale,
-                        ppmm=PPMM, margin_mm=MARGIN_MM) for p in sel]
+                        ppmm=PPMM, margin_mm=margin) for p in sel]
     return _run(sel, rois, side, model_path, thresh)
 
 
@@ -122,6 +140,7 @@ def classify_raster(raster: np.ndarray, ppmm: float, outline: Outline,
     """Same as classify(), but from a (distortion-corrected) board raster."""
     from .distortion import extract_patch
     sel = _select(outline, parts, side)
-    rois = [extract_patch(raster, outline, p, ppmm, margin_mm=MARGIN_MM)
+    margin = model_margin(model_path)
+    rois = [extract_patch(raster, outline, p, ppmm, margin_mm=margin)
             for p in sel]
     return _run(sel, rois, side, model_path, thresh)

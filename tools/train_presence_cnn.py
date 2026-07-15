@@ -172,4 +172,14 @@ print("test-photo errors by refdes:",
       Counter(zip(refdes[errP], y[errP])).most_common(20))
 
 torch.jit.script(net).save(MODEL_OUT)
+# margin sidecar: inference (presence_cnn.model_margin) crops with the
+# margin the model was trained on — a mismatch silently breaks verdicts
+if "margin_mm" in d:
+    side_file = os.path.splitext(MODEL_OUT)[0] + ".json"
+    with open(side_file, "w", encoding="utf-8") as f:
+        json.dump({"margin_mm": float(d["margin_mm"])}, f)
+    print(f"saved {side_file} (margin {float(d['margin_mm'])} mm)")
+else:
+    print("WARNING: dataset has no margin_mm — rebuild it so the model "
+          "sidecar can pin the crop margin")
 print("saved", MODEL_OUT)

@@ -52,7 +52,7 @@ def corr(a, b):
 
 photos = []
 for path in sorted(glob.glob(BASE + "/pcb_photo_samples/*")):
-    if not path.lower().endswith((".jpg", ".dng")):
+    if not path.lower().endswith((".jpg", ".dng", ".cr3", ".cr2", ".nef")):
         continue
     best = None
     for side in ("top", "bottom"):
@@ -105,7 +105,7 @@ for path, side, r in photos:
 np.savez_compressed(OUT,
                     X=np.stack(X), y=np.array(y),
                     refdes=np.array(ref_ids), photo=np.array(photo_ids),
-                    side=np.array(sides))
+                    side=np.array(sides), margin_mm=MARGIN)
 print("saved", len(X), "samples,",
       int(np.sum(np.array(y) == 0)), "bare /", int(np.sum(np.array(y) == 1)),
       "populated")
