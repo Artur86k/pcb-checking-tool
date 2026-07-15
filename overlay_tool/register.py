@@ -26,9 +26,9 @@ class RegistrationResult:
 
 
 def load_photo(path: str, max_dim: int = MAX_PHOTO_DIM) -> np.ndarray:
-    """Load JPG/PNG via OpenCV or DNG via rawpy, downscaled, as RGB."""
+    """Load JPG/PNG via OpenCV or camera raw via rawpy, downscaled, as RGB."""
     rgb = None
-    if path.lower().endswith((".dng", ".raw", ".arw", ".cr2", ".nef")):
+    if path.lower().endswith((".dng", ".raw", ".arw", ".cr2", ".cr3", ".nef")):
         try:
             import rawpy
             try:
@@ -95,10 +95,21 @@ def segment_board(rgb: np.ndarray) -> np.ndarray:
         # border's own spread (Otsu fails when the board has two
         # appearance modes, green mask vs gold, and splits between them).
         dist = np.linalg.norm(lab[:, :, 1:] - bg[1:], axis=2)
-        border_dist = np.concatenate([
-            dist[:b].ravel(), dist[-b:].ravel(),
-            dist[:, :b].ravel(), dist[:, -b:].ravel()])
-        t = max(1.5 * float(np.percentile(border_dist, 99.0)), 10.0)
+        # A foreign object in the border band (tray, tools) inflates the
+        # p99 until the board itself drops below the threshold. Objects are
+        # localized, so estimate the spread per border segment (2 per edge)
+        # and drop segments whose median is off the mat's — pixel-level
+        # trimming can't help because the mat's own spread hides the object.
+        h2, w2 = h // 2, w // 2
+        segs = [dist[:b, :w2], dist[:b, w2:], dist[-b:, :w2], dist[-b:, w2:],
+                dist[:h2, :b], dist[h2:, :b], dist[:h2, -b:], dist[h2:, -b:]]
+        seg_med = np.array([np.median(s) for s in segs])
+        med = float(np.median(seg_med))
+        keep = [s for s, sm in zip(segs, seg_med) if sm <= med + 6.0]
+        # median of per-segment p99s: one partially-contaminated segment
+        # (object edge, glare patch) cannot drag the pooled tail up
+        t = max(1.5 * float(np.median([np.percentile(s, 99.0)
+                                       for s in keep])), 10.0)
         m = (dist > t).astype(np.uint8) * 255
 
     # Open FIRST: fabric texture passes Otsu as speckle, and closing would

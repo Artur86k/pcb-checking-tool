@@ -33,7 +33,8 @@ IOU_WARN = 0.90  # below this, flag the fit as questionable
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".pcb_overlay_tool.json")
 
 IMAGE_TYPES = [
-    ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff *.dng"),
+    ("Images", "*.jpg *.jpeg *.png *.bmp *.tif *.tiff "
+               "*.dng *.cr3 *.cr2 *.nef *.arw"),
     ("All files", "*.*"),
 ]
 DXF_TYPES = [("DXF board outline", "*.dxf"), ("All files", "*.*")]
