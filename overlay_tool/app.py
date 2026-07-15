@@ -365,6 +365,9 @@ class OverlayApp:
                 "Open a BOM now?"):
             self.open_bom()
         if not presence_cnn.available():
+            # several machines have multiple Pythons: name the interpreter
+            # and the real error so a screenshot of this dialog is enough
+            # to diagnose which install is broken
             try:
                 import torch  # noqa: F401
                 reason = ("the model file golden/presence_cnn.pt was not "
@@ -372,12 +375,18 @@ class OverlayApp:
                           "PC where the CNN was trained, or retrain: see "
                           "docs/training.md)")
             except ImportError:
-                reason = "the 'torch' package is not installed"
+                reason = ("the 'torch' package is not installed for this "
+                          f"interpreter:\n{sys.executable}\n\n"
+                          f"pip install torch --index-url "
+                          f"https://download.pytorch.org/whl/cpu")
             except Exception as ex:
-                reason = (f"torch is installed but failed to load "
-                          f"({type(ex).__name__}) — usually the missing "
-                          f"Microsoft Visual C++ runtime; install "
-                          f"vc_redist.x64.exe or the CPU torch wheel")
+                reason = (f"torch is installed but failed to load:\n"
+                          f"{type(ex).__name__}: {str(ex)[:300]}\n"
+                          f"interpreter: {sys.executable}\n\n"
+                          f"Usual causes: missing Microsoft Visual C++ "
+                          f"runtime (install vc_redist.x64.exe) or a GPU "
+                          f"wheel without NVIDIA drivers (reinstall the "
+                          f"CPU wheel)")
             if not messagebox.askyesno(
                     "CNN unavailable — results will be unreliable",
                     f"The CNN presence classifier cannot be used because "
